@@ -224,10 +224,18 @@ def figure_1_ess_vs_error_by_estimator(df: pd.DataFrame, output_dir: str | Path)
 
     handles, labels = axes[0, 0].get_legend_handles_labels()
     if handles:
-        fig.legend(handles[: len(np.unique(df['beta']))], labels[: len(np.unique(df['beta']))], loc="upper center", ncol=4, frameon=True)
+        beta_count = len(np.unique(df["beta"]))
+        fig.legend(
+            handles[:beta_count],
+            labels[:beta_count],
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.005),
+            ncol=min(4, beta_count),
+            frameon=True,
+        )
 
     fig.suptitle("ESS as reliability signal: IS vs DM/FQE/MRDR", y=0.99)
-    fig.tight_layout(rect=[0.02, 0.03, 0.98, 0.95])
+    fig.tight_layout(rect=[0.02, 0.08, 0.98, 0.95])
     save_figure(fig, output_dir, "benchmark_fig1_ess_vs_error_by_estimator")
 
 
@@ -261,11 +269,8 @@ def figure_2_same_ess_different_error(
         y_col = f"abs_error_{key}"
 
         box_data = [sub[np.isclose(sub["beta"], beta)][y_col].to_numpy() for beta in beta_values]
-        ax.boxplot(box_data, labels=[f"beta={b:g}" for b in beta_values], showfliers=False)
-
-        y_top = ax.get_ylim()[1]
-        for j, beta in enumerate(beta_values, start=1):
-            ax.text(j, y_top * 0.97, f"ESS~{ess_meds.loc[beta]:.1f}", ha="center", va="top", fontsize=9)
+        ax.boxplot(box_data, labels=[f"beta={b:g}\nESS~{ess_meds.loc[b]:.1f}" for b in beta_values], showfliers=False)
+        ax.tick_params(axis="x", labelsize=10)
 
         panel = chr(ord("A") + i)
         ax.set_title(f"{panel}. {label}")
@@ -275,7 +280,7 @@ def figure_2_same_ess_different_error(
         f"Same-ESS counterexample (fixed alpha={fixed_alpha:g}, ESS median CV={ess_cv:.2f})",
         y=0.99,
     )
-    fig.tight_layout(rect=[0.02, 0.03, 0.98, 0.95])
+    fig.tight_layout(rect=[0.02, 0.02, 0.98, 0.95])
     save_figure(fig, output_dir, "benchmark_fig2_same_ess_different_error")
     return float(fixed_alpha)
 
@@ -331,9 +336,9 @@ def figure_3_ess_changes_error_stability(
     ax_bottom.set_xlabel("alpha (policy divergence)")
     ax_bottom.set_ylabel("Median Absolute Error")
     ax_bottom.set_title("B. Error response by estimator")
-    ax_bottom.legend(frameon=True, ncol=2)
+    ax_bottom.legend(frameon=True, ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.18))
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0.02, 0.05, 0.98, 0.98])
     save_figure(fig, output_dir, "benchmark_fig3_ess_changes_error_stability")
 
 
