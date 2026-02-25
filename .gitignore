@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments
+.venv/
+.env
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local editor / OS
+.vscode/
+.DS_Store
+
+# Temporary local plotting caches
+.tmp_mpl/
+.tmp_cache/
+
+# Results are generated; keep folder, ignore contents except .gitkeep
+results/*
+!results/.gitkeep

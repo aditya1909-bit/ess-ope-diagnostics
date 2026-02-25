@@ -1,0 +1,23 @@
+name: random_mdp_baseline
+results_root: results
+gamma: 1.0
+temperature: 1.0
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+alphas: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+betas: [0.0, 0.25, 0.5, 1.0]
+dataset_sizes: [50, 200, 1000]
+env_repeats: 1
+policy_repeats: 1
+dataset_repeats: 1
+
+fqe_l2_reg: 0.0001
+mrdr_l2_reg: 0.001
+
+env:
+  num_states: 100
+  num_actions: 6
+  horizon: 20
+  branch_factor: 3
+  linear_feature_dim: 12
+  reward_noise_std: 0.0
