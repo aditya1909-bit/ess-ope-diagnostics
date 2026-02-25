@@ -10,7 +10,7 @@ This project builds controlled RandomMDP sweeps with exact dynamic-programming g
 ## Repo Flow (Recommended)
 1. Run benchmark sweep + plot generation:
 ```bash
-python experiments/run_benchmark.py --config configs/sweeps/random_mdp_robust.yaml
+python experiments/run_benchmark.py --config configs/sweeps/random_mdp_ultra.yaml
 ```
 2. Re-analyze any existing results:
 ```bash
@@ -43,6 +43,8 @@ Use these knobs in sweep YAML for stronger evidence:
 - `env_repeats`: independent environment draws per `(seed, beta)`
 - `policy_repeats`: independent policy-pair draws per environment
 - `dataset_repeats`: independent offline datasets per condition
+- `num_workers`: process-level parallelism for condition evaluation (macOS-safe `spawn` mode)
+- `mp_chunksize`: number of condition tasks dispatched per worker chunk
 
 Total rows:
 `len(seeds) * len(betas) * len(alphas) * len(dataset_sizes) * env_repeats * policy_repeats * dataset_repeats`
@@ -50,7 +52,17 @@ Total rows:
 Profiles:
 - `configs/sweeps/random_mdp_baseline.yaml`: quick checks
 - `configs/sweeps/random_mdp_robust.yaml`: strong default benchmark
-- `configs/sweeps/random_mdp_intensive.yaml`: high-intensity run for tighter estimates
+- `configs/sweeps/random_mdp_intensive.yaml`: 20x `robust` row count for tighter estimates
+- `configs/sweeps/random_mdp_ultra.yaml`: higher-than-intensive run for maximum stability
+
+## Apple Silicon (Mac) Efficiency
+- Parallelism is enabled via sweep config (`num_workers`, `mp_chunksize`) using multiprocessing `spawn`, which is the stable mode on macOS.
+- Start with `num_workers: 8` on M-series laptops; increase gradually if memory allows.
+- To avoid BLAS thread oversubscription with multiprocessing, run with:
+```bash
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+python experiments/run_benchmark.py --config configs/sweeps/random_mdp_ultra.yaml
+```
 
 Paper claims mode is enabled by default in `run_benchmark.py` and `analyze_results.py`.
 Disable with `--no-paper-mode` if you only want figures + base summaries.
@@ -82,4 +94,3 @@ pytest -q
 ```
 
 ## Citation / License
-Add citation and license details before publication.

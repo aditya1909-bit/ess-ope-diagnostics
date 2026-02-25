@@ -11,6 +11,8 @@ dataset_sizes: [100, 500]
 env_repeats: 2
 policy_repeats: 2
 dataset_repeats: 8
+num_workers: 4
+mp_chunksize: 2
 
 fqe_l2_reg: 0.0001
 mrdr_l2_reg: 0.001

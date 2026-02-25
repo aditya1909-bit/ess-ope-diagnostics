@@ -6,6 +6,7 @@ from typing import Iterable, List, Sequence
 import numpy as np
 import pandas as pd
 from scipy import stats
+from tqdm import tqdm
 
 
 @dataclass
@@ -13,7 +14,9 @@ class SummaryConfig:
     ci_level: float = 0.95
     bootstrap_samples: int = 400
     bootstrap_max_points: int = 5000
+    bootstrap_batch_size: int = 32
     random_seed: int = 0
+    show_progress: bool = False
 
 
 @dataclass
@@ -79,6 +82,7 @@ def _bootstrap_corr_ci(
     method: str,
     n_boot: int,
     max_points: int,
+    batch_size: int,
     ci_level: float,
     seed: int,
 ) -> tuple[float, float, float]:
@@ -101,13 +105,43 @@ def _bootstrap_corr_ci(
     if not np.isfinite(point):
         return np.nan, np.nan, np.nan
 
-    boots = []
-    n = len(x)
-    for _ in range(int(n_boot)):
-        bidx = rng.integers(0, n, size=n)
-        val = _corr(x[bidx], y[bidx], method=method)
-        if np.isfinite(val):
-            boots.append(val)
+    # Use chunked vectorized bootstrap to reduce Python-loop overhead.
+    # For Spearman bootstrap, compute Pearson on pre-ranked vectors for speed.
+    if method == "pearson":
+        x_work = x.astype(float, copy=False)
+        y_work = y.astype(float, copy=False)
+    elif method == "spearman":
+        x_work = stats.rankdata(x).astype(float, copy=False)
+        y_work = stats.rankdata(y).astype(float, copy=False)
+    else:
+        raise ValueError(f"Unsupported method: {method}")
+
+    def _corr_rows(xb: np.ndarray, yb: np.ndarray) -> np.ndarray:
+        x_mean = xb.mean(axis=1, keepdims=True)
+        y_mean = yb.mean(axis=1, keepdims=True)
+        xc = xb - x_mean
+        yc = yb - y_mean
+        cov = np.sum(xc * yc, axis=1)
+        x_var = np.sum(xc * xc, axis=1)
+        y_var = np.sum(yc * yc, axis=1)
+        denom = np.sqrt(x_var * y_var)
+        out = np.full(xb.shape[0], np.nan, dtype=float)
+        mask = denom > 1e-20
+        out[mask] = cov[mask] / denom[mask]
+        return out
+
+    boots: List[float] = []
+    n = len(x_work)
+    batch_size = max(1, int(batch_size))
+    remaining = int(n_boot)
+    while remaining > 0:
+        b = min(batch_size, remaining)
+        bidx = rng.integers(0, n, size=(b, n))
+        vals = _corr_rows(x_work[bidx], y_work[bidx])
+        vals = vals[np.isfinite(vals)]
+        if vals.size:
+            boots.extend(vals.tolist())
+        remaining -= b
 
     if not boots:
         return point, np.nan, np.nan
@@ -127,7 +161,12 @@ def build_estimator_summary(
     keys = list(estimator_keys) if estimator_keys is not None else _default_estimator_keys(df)
 
     rows = []
-    for i, key in enumerate(keys):
+    key_iter = (
+        tqdm(keys, desc="Estimator summary", leave=False)
+        if cfg.show_progress
+        else keys
+    )
+    for i, key in enumerate(key_iter):
         abs_err = df[f"abs_error_{key}"].to_numpy()
         sq_err = df[f"squared_error_{key}"].to_numpy()
         bias = df[f"error_{key}"].to_numpy()
@@ -143,6 +182,7 @@ def build_estimator_summary(
             method="pearson",
             n_boot=cfg.bootstrap_samples,
             max_points=cfg.bootstrap_max_points,
+            batch_size=cfg.bootstrap_batch_size,
             ci_level=cfg.ci_level,
             seed=cfg.random_seed + i * 17 + 1,
         )
@@ -152,6 +192,7 @@ def build_estimator_summary(
             method="spearman",
             n_boot=cfg.bootstrap_samples,
             max_points=cfg.bootstrap_max_points,
+            batch_size=cfg.bootstrap_batch_size,
             ci_level=cfg.ci_level,
             seed=cfg.random_seed + i * 17 + 2,
         )
@@ -187,42 +228,48 @@ def build_condition_summary(
     estimator_keys: Sequence[str] | None = None,
     group_cols: Iterable[str] = ("alpha", "beta", "K"),
     ci_level: float = 0.95,
+    show_progress: bool = False,
 ) -> pd.DataFrame:
     keys = list(estimator_keys) if estimator_keys is not None else _default_estimator_keys(df)
     gcols = list(group_cols)
 
-    records = []
-    for key in keys:
+    ess_norm = df["ess_is_over_k"] if "ess_is_over_k" in df else (df["ess_is"] / df["K"].clip(lower=1))
+    base = df.assign(_ess_norm=ess_norm)
+    ess_group = (
+        base.groupby(gcols, as_index=False)
+        .agg(
+            mean_ess_is=("ess_is", "mean"),
+            median_ess_is=("ess_is", "median"),
+            mean_ess_norm=("_ess_norm", "mean"),
+        )
+    )
+
+    z = float(stats.norm.ppf(0.5 + ci_level / 2.0))
+    frames: List[pd.DataFrame] = []
+    key_iter = (
+        tqdm(keys, desc="Condition summary", leave=False)
+        if show_progress
+        else keys
+    )
+    for key in key_iter:
         err_col = f"abs_error_{key}"
-        grouped = df.groupby(gcols, as_index=False)
+        agg = (
+            base.groupby(gcols)[err_col]
+            .agg(n="size", mean_abs_error="mean", std_abs_error="std", median_abs_error="median")
+            .reset_index()
+        )
+        agg["std_abs_error"] = agg["std_abs_error"].fillna(0.0)
+        se = agg["std_abs_error"] / np.sqrt(agg["n"].clip(lower=1))
+        agg["mean_abs_error_ci_low"] = agg["mean_abs_error"] - z * se
+        agg["mean_abs_error_ci_high"] = agg["mean_abs_error"] + z * se
+        agg["estimator"] = key
+        agg = agg.merge(ess_group, on=gcols, how="left")
+        frames.append(agg)
 
-        for _, grp in grouped:
-            vals = grp[err_col].to_numpy(dtype=float)
-            mean_abs, std_abs, ci_low, ci_high = _mean_ci(vals, ci_level=ci_level)
-
-            rec = {col: grp.iloc[0][col] for col in gcols}
-            rec.update(
-                {
-                    "estimator": key,
-                    "n": int(len(vals)),
-                    "mean_abs_error": mean_abs,
-                    "std_abs_error": std_abs,
-                    "mean_abs_error_ci_low": ci_low,
-                    "mean_abs_error_ci_high": ci_high,
-                    "median_abs_error": float(np.median(vals)) if len(vals) > 0 else np.nan,
-                    "mean_ess_is": float(np.mean(grp["ess_is"])),
-                    "median_ess_is": float(np.median(grp["ess_is"])),
-                    "mean_ess_norm": float(np.mean(grp["ess_is_over_k"]))
-                    if "ess_is_over_k" in grp
-                    else float(np.mean(grp["ess_is"] / grp["K"].clip(lower=1))),
-                }
-            )
-            records.append(rec)
-
-    if not records:
+    if not frames:
         return pd.DataFrame()
 
-    out = pd.DataFrame(records)
+    out = pd.concat(frames, ignore_index=True)
     sort_cols = [c for c in ["estimator", *gcols] if c in out.columns]
     return out.sort_values(sort_cols).reset_index(drop=True)
 

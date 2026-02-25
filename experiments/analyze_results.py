@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 
 import pandas as pd
+from tqdm import tqdm
 
 from ess_ope.evaluation.summary import (
     PaperClaimConfig,
@@ -36,13 +37,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--bootstrap-samples",
         type=int,
-        default=400,
+        default=16000,
         help="Bootstrap samples for correlation confidence intervals in summary tables",
     )
     parser.add_argument(
         "--bootstrap-max-points",
         type=int,
-        default=5000,
+        default=200000,
         help="Max points used for bootstrap correlation CI computation",
     )
     parser.add_argument(
@@ -50,6 +51,12 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Write CI-aware paper claims tables (paper_claims.csv, paper_claim_summary.csv).",
+    )
+    parser.add_argument(
+        "--progress",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Show progress bars for interpretation pipeline stages and summaries.",
     )
     return parser.parse_args()
 
@@ -73,10 +80,13 @@ def _load_results(path: Path) -> pd.DataFrame:
 
 def main() -> None:
     args = parse_args()
+    stage_bar = tqdm(total=7, desc="Interpret results", disable=not args.progress)
     df = _load_results(Path(args.results))
+    stage_bar.update(1)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    stage_bar.update(1)
 
     report = generate_benchmark_figures(
         df=df,
@@ -84,12 +94,16 @@ def main() -> None:
         fixed_alpha=args.fixed_alpha,
         fixed_beta=args.fixed_beta,
     )
+    stage_bar.update(1)
     summary_cfg = SummaryConfig(
         bootstrap_samples=args.bootstrap_samples,
         bootstrap_max_points=args.bootstrap_max_points,
+        show_progress=args.progress,
     )
     estimator_summary = build_estimator_summary(df, config=summary_cfg)
-    condition_summary = build_condition_summary(df)
+    stage_bar.update(1)
+    condition_summary = build_condition_summary(df, show_progress=args.progress)
+    stage_bar.update(1)
     paper_claims = build_paper_claims_table(
         df=df,
         estimator_summary=estimator_summary,
@@ -97,6 +111,7 @@ def main() -> None:
         config=PaperClaimConfig(),
     )
     paper_claim_summary = build_paper_claim_summary(paper_claims)
+    stage_bar.update(1)
     report_path = output_dir / "benchmark_report.csv"
     estimator_summary_path = output_dir / "estimator_summary.csv"
     condition_summary_path = output_dir / "condition_summary.csv"
@@ -108,6 +123,8 @@ def main() -> None:
     if args.paper_mode:
         paper_claims.to_csv(paper_claims_path, index=False)
         paper_claim_summary.to_csv(paper_claim_summary_path, index=False)
+    stage_bar.update(1)
+    stage_bar.close()
 
     print(f"Loaded rows: {len(df)}")
     print(f"Output dir: {output_dir}")

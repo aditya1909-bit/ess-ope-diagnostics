@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=str,
-        default="configs/sweeps/random_mdp_robust.yaml",
+        default="configs/sweeps/random_mdp_ultra.yaml",
         help="Sweep YAML config",
     )
     parser.add_argument(
@@ -48,13 +48,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--bootstrap-samples",
         type=int,
-        default=400,
+        default=16000,
         help="Bootstrap samples for correlation confidence intervals in summary tables",
     )
     parser.add_argument(
         "--bootstrap-max-points",
         type=int,
-        default=5000,
+        default=200000,
         help="Max points used for bootstrap correlation CI computation",
     )
     parser.add_argument(
