@@ -21,6 +21,7 @@ from ess_ope.evaluation.summary import (
     build_paper_claims_table,
 )
 from ess_ope.plotting.benchmark_figures import generate_benchmark_figures
+from ess_ope.utils.logging import refresh_latest_pointer, resolve_latest_path
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,13 +29,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--results",
         type=str,
-        default="results/latest/sweep_results.parquet",
+        default="results/latest_random_mdp/sweep_results.parquet",
         help="Path to sweep_results parquet/csv",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="results/latest/figures",
+        default="results/latest_random_mdp/figures",
         help="Directory for generated figures/report",
     )
     parser.add_argument("--fixed-alpha", type=float, default=None)
@@ -86,6 +87,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _load_results(path: Path) -> pd.DataFrame:
+    path = resolve_latest_path(path)
     if path.exists():
         if path.suffix == ".parquet":
             return pd.read_parquet(path)
@@ -104,11 +106,12 @@ def _load_results(path: Path) -> pd.DataFrame:
 
 def main() -> None:
     args = parse_args()
+    refresh_latest_pointer("results")
     stage_bar = tqdm(total=12, desc="Interpret results", disable=not args.progress)
     df = _load_results(Path(args.results))
     stage_bar.update(1)
 
-    output_dir = Path(args.output_dir)
+    output_dir = resolve_latest_path(Path(args.output_dir))
     output_dir.mkdir(parents=True, exist_ok=True)
     stage_bar.update(1)
 
@@ -147,6 +150,8 @@ def main() -> None:
         bias_variance_summary=bias_variance_summary,
         ci_interval_summary=ci_interval_summary,
         ci_coverage_summary=ci_coverage_summary,
+        estimator_summary=estimator_summary,
+        diagnostic_comparability=diagnostic_comparability,
     )
     stage_bar.update(1)
     paper_claims = build_paper_claims_table(

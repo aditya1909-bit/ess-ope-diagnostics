@@ -11,6 +11,7 @@ from ess_ope.evaluation.summary import (
     build_bias_variance_summary,
     build_ci_coverage_summary,
     build_ci_interval_summary,
+    build_estimator_summary,
 )
 from ess_ope.plotting.utils import save_figure
 
@@ -704,6 +705,189 @@ def figure_9_ci_method_comparison(
     save_figure(fig, output_dir, "benchmark_fig9_ci_method_comparison")
 
 
+def figure_10_ess_story_dashboard(
+    estimator_summary: pd.DataFrame,
+    bias_variance_summary: pd.DataFrame,
+    diagnostic_comparability: pd.DataFrame,
+    output_dir: str | Path,
+) -> None:
+    if estimator_summary.empty or bias_variance_summary.empty or diagnostic_comparability.empty:
+        return
+
+    _base_style()
+    colors = {"IS-PDIS": "#444444", "DR": "#ff7f0e", "DM": "#1f77b4", "FQE": "#d62728"}
+    labels = {key: label for key, label in ESTIMATOR_SPECS}
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10), squeeze=False)
+
+    ax = axes[0, 0]
+    _style_axis(ax)
+    est_plot = estimator_summary.copy()
+    est_plot["label"] = est_plot["estimator"].map(labels).fillna(est_plot["estimator"])
+    est_plot = est_plot[est_plot["label"].isin(colors)].copy()
+    est_plot = est_plot.sort_values("spearman_ess_abs_error")
+    x = np.arange(len(est_plot))
+    vals = est_plot["spearman_ess_abs_error"].to_numpy()
+    low = vals - est_plot["spearman_ci_low"].to_numpy()
+    high = est_plot["spearman_ci_high"].to_numpy() - vals
+    ax.bar(x, vals, color=[colors[label] for label in est_plot["label"]], alpha=0.9)
+    ax.errorbar(x, vals, yerr=np.vstack([low, high]), fmt="none", ecolor="black", capsize=4, linewidth=1.3)
+    ax.axhline(0.0, color="black", linestyle="--", linewidth=1.3)
+    ax.set_xticks(x, est_plot["label"], rotation=0)
+    ax.set_ylabel("Spearman(ESS, |error|)")
+    ax.set_title("A. ESS tracks error for IS/DR, not for FQE")
+
+    ax = axes[0, 1]
+    _style_axis(ax)
+    scatter_df = (
+        bias_variance_summary.groupby("estimator", as_index=False)
+        .agg(mean_abs_bias=("abs_bias", "mean"), mean_variance=("variance", "mean"), mean_mse=("mse", "mean"))
+    )
+    scatter_df["label"] = scatter_df["estimator"].map(labels).fillna(scatter_df["estimator"])
+    for _, row in scatter_df.iterrows():
+        label = str(row["label"])
+        ax.scatter(
+            row["mean_variance"],
+            row["mean_abs_bias"],
+            s=1400 * float(row["mean_mse"]) + 140,
+            color=colors.get(label, "#777777"),
+            alpha=0.85,
+            edgecolors="black",
+            linewidths=1.2,
+        )
+        ax.text(float(row["mean_variance"]) * 1.02 + 1e-6, float(row["mean_abs_bias"]) * 1.02 + 1e-6, label, fontsize=11)
+    ax.set_xlabel("Across-dataset variance")
+    ax.set_ylabel("Absolute bias")
+    ax.set_title("B. Why ESS fails for biased estimators")
+
+    ax = axes[1, 0]
+    _style_axis(ax)
+    ess_diag = diagnostic_comparability[diagnostic_comparability["diagnostic"] == "ess"].copy()
+    for _, label in ESTIMATOR_SPECS:
+        agg = ess_diag[ess_diag["estimator"] == label].sort_values("mean_ess_norm")
+        if agg.empty:
+            continue
+        ax.plot(
+            agg["mean_ess_norm"],
+            agg["mean_abs_error"],
+            marker="o",
+            linewidth=2.2,
+            label=label,
+            color=colors.get(label, None),
+        )
+    ax.set_xlabel("Matched ESS bin center")
+    ax.set_ylabel("Mean absolute error")
+    ax.set_title("C. Same ESS still implies different risk")
+    ax.legend(frameon=True, ncol=2)
+
+    ax = axes[1, 1]
+    _style_axis(ax)
+    rel_df = bias_variance_summary.copy()
+    rel_df["label"] = rel_df["estimator"].map(labels).fillna(rel_df["estimator"])
+    for label, g in rel_df.groupby("label"):
+        g = g.sort_values("median_ess_norm")
+        ax.plot(
+            g["median_ess_norm"],
+            g["mse"],
+            marker="o",
+            linewidth=2.0,
+            color=colors.get(str(label), None),
+            label=str(label),
+        )
+    ax.set_xlabel("Median normalized ESS")
+    ax.set_ylabel("MSE")
+    ax.set_title("D. DR improves with ESS; FQE stays dominated by bias")
+
+    fig.suptitle("ESS Story: why it works for IS/DR and fails for biased estimators", y=0.99)
+    fig.tight_layout(rect=[0.02, 0.03, 0.98, 0.96])
+    save_figure(fig, output_dir, "benchmark_fig10_ess_story_dashboard")
+
+
+def figure_11_ci_story_dashboard(
+    ci_coverage_summary: pd.DataFrame,
+    bias_variance_summary: pd.DataFrame,
+    output_dir: str | Path,
+) -> None:
+    if ci_coverage_summary.empty or bias_variance_summary.empty:
+        return
+
+    _base_style()
+    colors = {"IS-PDIS": "#444444", "DR": "#ff7f0e", "DM": "#1f77b4", "FQE": "#d62728"}
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10), squeeze=False)
+
+    bootstrap = ci_coverage_summary[ci_coverage_summary["ci_method"] == "bootstrap"].copy()
+    if bootstrap.empty:
+        return
+    bootstrap = bootstrap[bootstrap["estimator"].isin(colors)].copy()
+    bootstrap = bootstrap.sort_values("coverage_rate", ascending=False)
+
+    ax = axes[0, 0]
+    _style_axis(ax)
+    x = np.arange(len(bootstrap))
+    ax.bar(x, bootstrap["coverage_rate"], color=[colors[label] for label in bootstrap["estimator"]], alpha=0.9)
+    ax.axhline(0.95, color="black", linestyle="--", linewidth=1.4)
+    ax.set_xticks(x, bootstrap["estimator"], rotation=0)
+    ax.set_ylabel("Bootstrap 95% coverage")
+    ax.set_title("A. CI calibration is good for IS/DR, bad for DM/FQE")
+
+    ax = axes[0, 1]
+    _style_axis(ax)
+    ax.scatter(
+        bootstrap["mean_half_width"],
+        bootstrap["mean_abs_error"],
+        s=180,
+        color=[colors[label] for label in bootstrap["estimator"]],
+        edgecolors="black",
+        linewidths=1.0,
+    )
+    lim = max(float(bootstrap["mean_half_width"].max()), float(bootstrap["mean_abs_error"].max())) * 1.1
+    ax.plot([0.0, lim], [0.0, lim], linestyle="--", color="black", linewidth=1.2)
+    for _, row in bootstrap.iterrows():
+        ax.text(float(row["mean_half_width"]) * 1.01 + 1e-6, float(row["mean_abs_error"]) * 1.01 + 1e-6, str(row["estimator"]), fontsize=11)
+    ax.set_xlim(0.0, lim)
+    ax.set_ylim(0.0, lim)
+    ax.set_xlabel("Mean CI half-width")
+    ax.set_ylabel("Mean absolute error")
+    ax.set_title("B. Intervals only work when width covers actual error")
+
+    ax = axes[1, 0]
+    _style_axis(ax)
+    rel = bootstrap.sort_values("bias_to_half_width_ratio")
+    x = np.arange(len(rel))
+    ax.bar(x, rel["bias_to_half_width_ratio"], color=[colors[label] for label in rel["estimator"]], alpha=0.9)
+    ax.axhline(1.0, color="black", linestyle="--", linewidth=1.2)
+    ax.set_xticks(x, rel["estimator"], rotation=0)
+    ax.set_ylabel("|bias| / mean half-width")
+    ax.set_title("C. Bias overwhelms the CI for DM/FQE")
+
+    ax = axes[1, 1]
+    _style_axis(ax)
+    merged = bootstrap.merge(
+        bias_variance_summary.groupby("estimator", as_index=False).agg(mean_abs_bias=("abs_bias", "mean")),
+        on="estimator",
+        how="left",
+    )
+    merged = merged.sort_values("mean_abs_bias")
+    ax.scatter(
+        merged["mean_abs_bias"],
+        merged["coverage_gap"],
+        s=180,
+        color=[colors[label] for label in merged["estimator"]],
+        edgecolors="black",
+        linewidths=1.0,
+    )
+    ax.axhline(0.0, color="black", linestyle="--", linewidth=1.2)
+    for _, row in merged.iterrows():
+        ax.text(float(row["mean_abs_bias"]) * 1.01 + 1e-6, float(row["coverage_gap"]) + 0.01, str(row["estimator"]), fontsize=11)
+    ax.set_xlabel("Mean absolute bias")
+    ax.set_ylabel("Coverage gap (observed - 0.95)")
+    ax.set_title("D. Coverage collapses as estimator bias grows")
+
+    fig.suptitle("CI Story: why 95% intervals calibrate for some estimators and fail for others", y=0.99)
+    fig.tight_layout(rect=[0.02, 0.03, 0.98, 0.96])
+    save_figure(fig, output_dir, "benchmark_fig11_ci_story_dashboard")
+
+
 def generate_benchmark_figures(
     df: pd.DataFrame,
     output_dir: str | Path,
@@ -712,6 +896,8 @@ def generate_benchmark_figures(
     bias_variance_summary: Optional[pd.DataFrame] = None,
     ci_interval_summary: Optional[pd.DataFrame] = None,
     ci_coverage_summary: Optional[pd.DataFrame] = None,
+    estimator_summary: Optional[pd.DataFrame] = None,
+    diagnostic_comparability: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     figure_1_ess_vs_error_by_estimator(df, output_dir)
     selected_alpha = figure_2_same_ess_different_error(df, output_dir, fixed_alpha=fixed_alpha)
@@ -721,10 +907,14 @@ def generate_benchmark_figures(
     bias_var = bias_variance_summary if bias_variance_summary is not None else build_bias_variance_summary(df)
     ci_intervals = ci_interval_summary if ci_interval_summary is not None else build_ci_interval_summary(df)
     ci_coverage = ci_coverage_summary if ci_coverage_summary is not None else build_ci_coverage_summary(ci_intervals)
+    est_summary = estimator_summary if estimator_summary is not None else build_estimator_summary(df)
+    diag_summary = diagnostic_comparability if diagnostic_comparability is not None else pd.DataFrame()
     figure_6_ess_bias_variance_mse(bias_var, output_dir)
     figure_7_matched_ess_risk_curves(df, output_dir)
     figure_8_ci_coverage_width(ci_coverage, output_dir)
     figure_9_ci_method_comparison(ci_coverage, output_dir)
+    figure_10_ess_story_dashboard(est_summary, bias_var, diag_summary, output_dir)
+    figure_11_ci_story_dashboard(ci_coverage, bias_var, output_dir)
 
     report = estimator_report(df, fixed_alpha=selected_alpha, fixed_beta=fixed_beta)
     if report.empty:

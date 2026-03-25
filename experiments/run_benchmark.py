@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=str,
-        default="configs/sweeps/random_mdp_ultra.yaml",
+        default="configs/sweeps/random_mdp_ci_ultra.yaml",
         help="Sweep YAML config",
     )
     parser.add_argument(
@@ -148,6 +148,8 @@ def main() -> None:
         bias_variance_summary=bias_variance_summary,
         ci_interval_summary=ci_interval_summary,
         ci_coverage_summary=ci_coverage_summary,
+        estimator_summary=estimator_summary,
+        diagnostic_comparability=diagnostic_comparability,
     )
     paper_claims = build_paper_claims_table(
         df=df,

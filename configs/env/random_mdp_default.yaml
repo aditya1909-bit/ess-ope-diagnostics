@@ -1,6 +1,0 @@
-num_states: 100
-num_actions: 6
-horizon: 20
-branch_factor: 3
-linear_feature_dim: 12
-reward_noise_std: 0.0
