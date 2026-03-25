@@ -33,8 +33,11 @@ def _build_linear_features(
     num_actions: int,
     feature_dim: int,
 ) -> np.ndarray:
+    if int(feature_dim) <= 0:
+        raise ValueError("ChainBanditConfig.linear_feature_dim must be positive")
+
     base_dim = 10
-    dim = max(int(feature_dim), base_dim)
+    dim = int(feature_dim)
     features = np.zeros((horizon, num_states, num_actions, dim), dtype=float)
 
     for t in range(horizon):
@@ -64,7 +67,7 @@ def _build_linear_features(
                         scale = idx + 1
                         extra[idx] = np.sin(scale * (t + 1)) + np.cos(scale * (s + 1 + a + 1))
                     phi = np.concatenate([phi, extra])
-                features[t, s, a] = phi[:feature_dim]
+                features[t, s, a] = phi[:dim]
 
     return features
 

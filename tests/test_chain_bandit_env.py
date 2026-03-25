@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from ess_ope.envs.chain_bandit import ChainBanditConfig, ChainBanditEnv
 from ess_ope.evaluation.ground_truth import dynamic_programming_value, monte_carlo_policy_value
@@ -99,3 +100,43 @@ def test_dynamic_programming_matches_monte_carlo() -> None:
     dp_value = dynamic_programming_value(env, policy).value
     mc_value = monte_carlo_policy_value(env, policy, num_episodes=5000, seed=123).value
     assert abs(dp_value - mc_value) < 0.12
+
+
+@pytest.mark.parametrize("feature_dim", [1, 8, 9, 10, 12])
+def test_chain_bandit_feature_dim_matches_requested_width(feature_dim: int) -> None:
+    env = ChainBanditEnv.generate(
+        ChainBanditConfig(
+            num_states=3,
+            num_actions=2,
+            horizon=4,
+            linear_feature_dim=feature_dim,
+            transition_strength=0.5,
+            reward_mean_scale=1.0,
+            reward_gap=0.4,
+            reward_std=0.1,
+            beta=0.2,
+            variant="transitional",
+            seed=13,
+        )
+    )
+
+    assert env.linear_sa_features.shape == (4, 3, 2, feature_dim)
+
+
+def test_chain_bandit_feature_dim_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="linear_feature_dim must be positive"):
+        ChainBanditEnv.generate(
+            ChainBanditConfig(
+                num_states=3,
+                num_actions=2,
+                horizon=4,
+                linear_feature_dim=0,
+                transition_strength=0.5,
+                reward_mean_scale=1.0,
+                reward_gap=0.4,
+                reward_std=0.1,
+                beta=0.2,
+                variant="transitional",
+                seed=13,
+            )
+        )

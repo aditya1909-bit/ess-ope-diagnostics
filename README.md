@@ -26,7 +26,7 @@ PYTHONPATH=src .venv/bin/python experiments/analyze_results.py --results results
 ```
 
 ## Notebook Workflow
-- `notebooks/02_interpret_results.ipynb`: load `results/latest_random_mdp` or `results/latest_chain_bandit`, regenerate figures, inspect report
+- `notebooks/02_interpret_results.ipynb`: load `results/latest_random_mdp` or `results/latest_chain_bandit`, regenerate figures, inspect the current run scorecard, compare against the previous same-env run, then review claims/tables/figures
 
 ## Key Output Files
 After a run, see `results/<timestamp>_<name>/`:
@@ -52,8 +52,10 @@ After a run, see `results/<timestamp>_<name>/`:
 - `figures/chain_bandit_sensitivity_summary.csv` (how reward mean scale, reward gap, reward variance, and transition strength move error and ESS)
 - `figures/paper_claims.csv` (claim-by-claim CI-aware verdicts)
 - `figures/paper_claim_summary.csv` (supported / inconclusive / not_supported breakdown)
+- `figures/trial_scorecard.csv` (one-row-per-estimator triage table with error, ESS correlation, bootstrap CI calibration, and aggregate claim verdict)
 
 `results/latest_runs.json` is tracked in git and records the latest overall run plus the latest run for each benchmark family. The directories `results/latest_random_mdp/` and `results/latest_chain_bandit/` are tracked snapshots containing the newest CSV data and figures for each benchmark family. `results/latest` remains a local convenience symlink to the newest raw timestamped run.
+`results/trial_index.csv` is a cross-run index for quick same-env comparisons across past trials.
 
 ## Sweep Intensity Controls
 Use these knobs in sweep YAML for stronger evidence:

@@ -63,6 +63,11 @@ def test_interval_pipeline_outputs_new_columns_and_figures(tmp_path: Path) -> No
     assert not ci_coverage_summary.empty
     assert not diagnostic_comparability.empty
     assert {"DR", "DM", "FQE", "IS-PDIS"}.issubset(set(ci_interval_summary["estimator"]))
+    analytic_estimators = set(ci_interval_summary.loc[ci_interval_summary["ci_method"] == "analytic", "estimator"])
+    assert "DM" not in analytic_estimators
+    assert "FQE" not in analytic_estimators
+    assert "DM" not in set(ci_coverage_summary.loc[ci_coverage_summary["ci_method"] == "analytic", "estimator"])
+    assert "FQE" not in set(ci_coverage_summary.loc[ci_coverage_summary["ci_method"] == "analytic", "estimator"])
 
     fig_dir = tmp_path / "figures"
     report = generate_benchmark_figures(

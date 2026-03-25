@@ -18,7 +18,21 @@ def test_iter_tasks_expands_chain_axes() -> None:
     )
 
     tasks = list(_iter_tasks(cfg))
-    assert len(tasks) == 2 * 2 * 1 * 2 * 1 * 2 * 2
+    expected = (
+        len(cfg.seeds)
+        * len(cfg.betas)
+        * len(cfg.transition_strengths)
+        * len(cfg.reward_mean_scales)
+        * len(cfg.reward_gaps)
+        * len(cfg.reward_stds)
+        * len(cfg.chain_variants)
+        * len(cfg.alphas)
+        * len(cfg.dataset_sizes)
+        * int(cfg.env_repeats)
+        * int(cfg.policy_repeats)
+        * int(cfg.dataset_repeats)
+    )
+    assert len(tasks) == expected
 
 
 def test_single_chain_condition_evaluates() -> None:

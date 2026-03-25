@@ -3,6 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from ess_ope.plotting._backend import ensure_headless_backend
+
+ensure_headless_backend()
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -275,7 +279,11 @@ def figure_2_same_ess_different_error(
         y_col = f"abs_error_{key}"
 
         box_data = [sub[np.isclose(sub["beta"], beta)][y_col].to_numpy() for beta in beta_values]
-        ax.boxplot(box_data, labels=[f"beta={b:g}\nESS~{ess_meds.loc[b]:.1f}" for b in beta_values], showfliers=False)
+        ax.boxplot(
+            box_data,
+            tick_labels=[f"beta={b:g}\nESS~{ess_meds.loc[b]:.1f}" for b in beta_values],
+            showfliers=False,
+        )
         ax.tick_params(axis="x", labelsize=10)
 
         panel = chr(ord("A") + i)
@@ -640,6 +648,7 @@ def figure_7_matched_ess_risk_curves(
 def figure_8_ci_coverage_width(
     ci_coverage_summary: pd.DataFrame,
     output_dir: str | Path,
+    ci_level: float = 0.95,
 ) -> None:
     if ci_coverage_summary.empty:
         return
@@ -652,12 +661,13 @@ def figure_8_ci_coverage_width(
     plot_df = ci_coverage_summary.copy()
     plot_df["label"] = plot_df["estimator"].astype(str) + "\n" + plot_df["ci_method"].astype(str)
     x = np.arange(len(plot_df))
+    target_label = int(round(float(ci_level) * 100.0))
 
     ax_cov.bar(x, plot_df["coverage_rate"], color="#4c78a8")
-    ax_cov.axhline(0.95, color="black", linestyle="--", linewidth=1.5)
+    ax_cov.axhline(ci_level, color="black", linestyle="--", linewidth=1.5)
     ax_cov.set_xticks(x, plot_df["label"], rotation=45, ha="right")
     ax_cov.set_ylabel("Coverage Rate")
-    ax_cov.set_title("A. CI calibration by estimator")
+    ax_cov.set_title(f"A. {target_label}% CI calibration by estimator")
 
     ax_width.bar(x, plot_df["mean_width"], color="#f58518")
     ax_width.set_xticks(x, plot_df["label"], rotation=45, ha="right")
@@ -807,6 +817,7 @@ def figure_11_ci_story_dashboard(
     ci_coverage_summary: pd.DataFrame,
     bias_variance_summary: pd.DataFrame,
     output_dir: str | Path,
+    ci_level: float = 0.95,
 ) -> None:
     if ci_coverage_summary.empty or bias_variance_summary.empty:
         return
@@ -825,9 +836,10 @@ def figure_11_ci_story_dashboard(
     _style_axis(ax)
     x = np.arange(len(bootstrap))
     ax.bar(x, bootstrap["coverage_rate"], color=[colors[label] for label in bootstrap["estimator"]], alpha=0.9)
-    ax.axhline(0.95, color="black", linestyle="--", linewidth=1.4)
+    ax.axhline(ci_level, color="black", linestyle="--", linewidth=1.4)
     ax.set_xticks(x, bootstrap["estimator"], rotation=0)
-    ax.set_ylabel("Bootstrap 95% coverage")
+    target_label = int(round(float(ci_level) * 100.0))
+    ax.set_ylabel(f"Bootstrap {target_label}% coverage")
     ax.set_title("A. CI calibration is good for IS/DR, bad for DM/FQE")
 
     ax = axes[0, 1]
@@ -880,10 +892,13 @@ def figure_11_ci_story_dashboard(
     for _, row in merged.iterrows():
         ax.text(float(row["mean_abs_bias"]) * 1.01 + 1e-6, float(row["coverage_gap"]) + 0.01, str(row["estimator"]), fontsize=11)
     ax.set_xlabel("Mean absolute bias")
-    ax.set_ylabel("Coverage gap (observed - 0.95)")
+    ax.set_ylabel(f"Coverage gap (observed - {ci_level:.2f})")
     ax.set_title("D. Coverage collapses as estimator bias grows")
 
-    fig.suptitle("CI Story: why 95% intervals calibrate for some estimators and fail for others", y=0.99)
+    fig.suptitle(
+        f"CI Story: why {target_label}% intervals calibrate for some estimators and fail for others",
+        y=0.99,
+    )
     fig.tight_layout(rect=[0.02, 0.03, 0.98, 0.96])
     save_figure(fig, output_dir, "benchmark_fig11_ci_story_dashboard")
 
@@ -893,6 +908,7 @@ def generate_benchmark_figures(
     output_dir: str | Path,
     fixed_alpha: Optional[float] = None,
     fixed_beta: float = 0.0,
+    ci_level: float = 0.95,
     bias_variance_summary: Optional[pd.DataFrame] = None,
     ci_interval_summary: Optional[pd.DataFrame] = None,
     ci_coverage_summary: Optional[pd.DataFrame] = None,
@@ -911,10 +927,10 @@ def generate_benchmark_figures(
     diag_summary = diagnostic_comparability if diagnostic_comparability is not None else pd.DataFrame()
     figure_6_ess_bias_variance_mse(bias_var, output_dir)
     figure_7_matched_ess_risk_curves(df, output_dir)
-    figure_8_ci_coverage_width(ci_coverage, output_dir)
+    figure_8_ci_coverage_width(ci_coverage, output_dir, ci_level=ci_level)
     figure_9_ci_method_comparison(ci_coverage, output_dir)
     figure_10_ess_story_dashboard(est_summary, bias_var, diag_summary, output_dir)
-    figure_11_ci_story_dashboard(ci_coverage, bias_var, output_dir)
+    figure_11_ci_story_dashboard(ci_coverage, bias_var, output_dir, ci_level=ci_level)
 
     report = estimator_report(df, fixed_alpha=selected_alpha, fixed_beta=fixed_beta)
     if report.empty:

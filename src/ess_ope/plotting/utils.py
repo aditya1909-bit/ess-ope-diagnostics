@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ess_ope.plotting._backend import ensure_headless_backend
+
+ensure_headless_backend()
+
 import matplotlib.pyplot as plt
 
 

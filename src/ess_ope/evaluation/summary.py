@@ -548,6 +548,9 @@ def build_ci_interval_summary(
             sub["estimator_key"] = key
             sub["estimator"] = label
             sub["ci_method"] = method
+            sub = sub[~(sub["ci_low"].isna() & sub["ci_high"].isna())].copy()
+            if sub.empty:
+                continue
             frames.append(sub)
 
     if not frames:
@@ -683,6 +686,8 @@ def _get_estimator_row(estimator_summary: pd.DataFrame, key: str) -> pd.Series |
 
 
 def _get_benchmark_row(benchmark_report: pd.DataFrame, label: str) -> pd.Series | None:
+    if "estimator" not in benchmark_report.columns:
+        return None
     sub = benchmark_report[benchmark_report["estimator"] == label]
     if sub.empty:
         return None
@@ -711,6 +716,10 @@ def build_paper_claims_table(
 ) -> pd.DataFrame:
     cfg = config or PaperClaimConfig()
     rows: List[dict] = []
+
+    def _bench_value(row: pd.Series, key: str) -> float:
+        value = row.get(key, np.nan)
+        return float(value) if pd.notna(value) else np.nan
 
     # Claim 1: ESS should be informative for IS.
     is_row = _get_estimator_row(estimator_summary, "is_pdis")
@@ -791,16 +800,16 @@ def build_paper_claims_table(
         if bench is None or est is None:
             continue
 
-        err_range = float(bench["error_range_over_beta_at_alpha_fixed"])
-        ess_cv = float(bench["ess_median_cv_over_beta_at_alpha_fixed"])
+        err_range = _bench_value(bench, "error_range_over_beta_at_alpha_fixed")
+        ess_cv = _bench_value(bench, "ess_median_cv_over_beta_at_alpha_fixed")
         mean_abs = max(float(est["mean_abs_error"]), 1e-12)
         err_rel = err_range / mean_abs
 
-        if ess_cv <= cfg.same_ess_cv_max and err_rel >= cfg.same_ess_error_rel_strong:
+        if np.isfinite(ess_cv) and np.isfinite(err_rel) and ess_cv <= cfg.same_ess_cv_max and err_rel >= cfg.same_ess_error_rel_strong:
             verdict = "supported"
-        elif ess_cv <= cfg.same_ess_cv_max and err_rel >= cfg.same_ess_error_rel_min:
+        elif np.isfinite(ess_cv) and np.isfinite(err_rel) and ess_cv <= cfg.same_ess_cv_max and err_rel >= cfg.same_ess_error_rel_min:
             verdict = "partially_supported"
-        elif ess_cv > cfg.same_ess_cv_max * 1.5:
+        elif np.isfinite(ess_cv) and ess_cv > cfg.same_ess_cv_max * 1.5:
             verdict = "not_supported"
         else:
             verdict = "inconclusive"
@@ -819,7 +828,7 @@ def build_paper_claims_table(
                     f"(strong >= {cfg.same_ess_error_rel_strong})"
                 ),
                 "aux_metric_ess_cv": ess_cv,
-                "aux_metric_alpha_fixed": float(bench["alpha_fixed_used"]),
+                "aux_metric_alpha_fixed": _bench_value(bench, "alpha_fixed_used"),
                 "verdict": verdict,
                 "confidence": "medium",
             }
@@ -833,17 +842,17 @@ def build_paper_claims_table(
         if bench is None or est is None:
             continue
 
-        beta_fixed = float(bench["beta_fixed_used"])
+        beta_fixed = _bench_value(bench, "beta_fixed_used")
         ess_ratio = _ess_change_ratio(df, beta_fixed=beta_fixed)
-        err_range_alpha = float(bench["error_range_over_alpha_at_beta_fixed"])
+        err_range_alpha = _bench_value(bench, "error_range_over_alpha_at_beta_fixed")
         mean_abs = max(float(est["mean_abs_error"]), 1e-12)
         err_rel_alpha = err_range_alpha / mean_abs
 
-        if ess_ratio >= cfg.ess_change_ratio_strong and err_rel_alpha <= cfg.stable_error_rel_strong:
+        if np.isfinite(ess_ratio) and np.isfinite(err_rel_alpha) and ess_ratio >= cfg.ess_change_ratio_strong and err_rel_alpha <= cfg.stable_error_rel_strong:
             verdict = "supported"
-        elif ess_ratio >= cfg.ess_change_ratio_min and err_rel_alpha <= cfg.stable_error_rel_max:
+        elif np.isfinite(ess_ratio) and np.isfinite(err_rel_alpha) and ess_ratio >= cfg.ess_change_ratio_min and err_rel_alpha <= cfg.stable_error_rel_max:
             verdict = "partially_supported"
-        elif ess_ratio >= cfg.ess_change_ratio_min and err_rel_alpha > cfg.stable_error_rel_max:
+        elif np.isfinite(ess_ratio) and np.isfinite(err_rel_alpha) and ess_ratio >= cfg.ess_change_ratio_min and err_rel_alpha > cfg.stable_error_rel_max:
             verdict = "not_supported"
         elif np.isfinite(ess_ratio) and ess_ratio < cfg.ess_change_ratio_min:
             verdict = "not_supported"
