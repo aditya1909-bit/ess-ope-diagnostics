@@ -10,7 +10,7 @@ dataset_sizes: [100]
 env_repeats: 1
 policy_repeats: 1
 dataset_repeats: 12
-num_workers: 2
+num_workers: 11
 mp_chunksize: 1
 
 analysis_estimators: [is_pdis, dr_oracle, dm_tabular, fqe_linear]

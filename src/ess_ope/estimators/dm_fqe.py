@@ -65,8 +65,19 @@ def _predict_tabular_q(weights: np.ndarray, num_states: int, num_actions: int) -
     return weights.reshape(num_states, num_actions)
 
 
-def _linear_features(states: np.ndarray, actions: np.ndarray, feature_tensor: np.ndarray) -> np.ndarray:
-    return feature_tensor[states, actions]
+def _linear_features(
+    states: np.ndarray,
+    actions: np.ndarray,
+    feature_tensor: np.ndarray,
+    t: int | None = None,
+) -> np.ndarray:
+    if feature_tensor.ndim == 3:
+        return feature_tensor[states, actions]
+    if feature_tensor.ndim == 4:
+        if t is None:
+            raise ValueError("Time index t is required for time-varying linear features")
+        return feature_tensor[t, states, actions]
+    raise ValueError("feature_tensor must have shape (S, A, D) or (H, S, A, D)")
 
 
 def direct_model_tabular(
@@ -133,7 +144,7 @@ def fitted_q_evaluation(
     if model_type == "tabular":
         x_all = _tabular_features(all_states, all_actions, num_states, num_actions)
     else:
-        x_all = _linear_features(all_states, all_actions, feature_tensor)
+        x_all = None
 
     for t in range(horizon - 1, -1, -1):
         s_t, a_t, r_t, sp_t, done_t = dataset.transitions_at_time(t)
@@ -149,7 +160,8 @@ def fitted_q_evaluation(
         if model_type == "tabular":
             x = _tabular_features(s_t, a_t, num_states, num_actions)
         else:
-            x = _linear_features(s_t, a_t, feature_tensor)
+            x = _linear_features(s_t, a_t, feature_tensor, t=t)
+            x_all = _linear_features(all_states, all_actions, feature_tensor, t=t)
 
         sw = None if regression_weights is None else regression_weights[:, t]
         w_t = _ridge_regression(x, y, l2_reg=l2_reg, sample_weights=sw)

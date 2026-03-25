@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 import hashlib
+import os
 from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -157,6 +158,37 @@ def _seed_hash(*values: Any) -> int:
     text = "|".join(map(str, values)).encode("utf-8")
     digest = hashlib.blake2b(text, digest_size=8).digest()
     return int.from_bytes(digest, "little") % (2**32 - 1)
+
+
+def _resolve_num_workers(config: SweepConfig) -> int:
+    requested = int(config.num_workers)
+    if requested > 0:
+        return requested
+    detected = os.cpu_count() or 1
+    return max(1, detected)
+
+
+def _estimated_bootstrap_fits(config: SweepConfig) -> int:
+    if str(config.interval_mode).lower() not in {"bootstrap", "both"}:
+        return 0
+    selected = len(list(config.analysis_estimators))
+    if selected <= 0:
+        return 0
+    total_conditions = (
+        len(config.seeds)
+        * int(config.env_repeats)
+        * int(config.policy_repeats)
+        * len(config.betas)
+        * len(config.transition_strengths)
+        * len(config.reward_mean_scales)
+        * len(config.reward_gaps)
+        * len(config.reward_stds)
+        * len(config.chain_variants)
+        * len(config.alphas)
+        * len(config.dataset_sizes)
+        * int(config.dataset_repeats)
+    )
+    return int(total_conditions * int(config.ci_bootstrap_samples) * selected)
 
 
 def _evaluate_condition(task: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -475,16 +507,30 @@ def run_sweep(config: SweepConfig) -> Tuple[pd.DataFrame, Path, Path]:
         * len(config.dataset_sizes)
         * int(config.dataset_repeats)
     )
-    pbar = tqdm(total=total, desc=f"Sweep:{config.name}")
+    num_workers = _resolve_num_workers(config)
+    est_bootstrap_fits = _estimated_bootstrap_fits(config)
+    pbar = tqdm(
+        total=total,
+        desc=f"Sweep:{config.name}",
+        dynamic_ncols=True,
+        smoothing=0.05,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+    )
+    pbar.set_postfix(
+        workers=num_workers,
+        chunksize=max(1, int(config.mp_chunksize)),
+        boot=int(config.ci_bootstrap_samples),
+        fits=est_bootstrap_fits,
+    )
 
-    if int(config.num_workers) <= 1:
+    if num_workers <= 1:
         for task in _iter_tasks(config):
             condition_rows = _evaluate_condition(task)
             rows.extend(condition_rows)
             pbar.update(len(condition_rows))
     else:
         ctx = get_context("spawn")
-        with ctx.Pool(processes=int(config.num_workers)) as pool:
+        with ctx.Pool(processes=num_workers) as pool:
             for condition_rows in pool.imap_unordered(
                 _evaluate_condition,
                 _iter_tasks(config),

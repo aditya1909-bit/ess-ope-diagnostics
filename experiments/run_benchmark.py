@@ -92,6 +92,18 @@ def parse_args() -> argparse.Namespace:
         default="is_pdis,dr_oracle,dm_tabular,fqe_linear",
         help="Comma-separated estimator keys used for focused summaries and interval work.",
     )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=None,
+        help="Override multiprocessing worker count. Use -1 to auto-use all detected CPUs.",
+    )
+    parser.add_argument(
+        "--mp-chunksize",
+        type=int,
+        default=None,
+        help="Override multiprocessing chunk size for the sweep worker pool.",
+    )
     return parser.parse_args()
 
 
@@ -103,6 +115,10 @@ def main() -> None:
     config.ci_bootstrap_samples = int(args.ci_bootstrap_samples)
     config.interval_mode = str(args.interval_mode)
     config.analysis_estimators = [part.strip() for part in args.estimators.split(",") if part.strip()]
+    if args.num_workers is not None:
+        config.num_workers = int(args.num_workers)
+    if args.mp_chunksize is not None:
+        config.mp_chunksize = int(args.mp_chunksize)
     df, run_dir, result_path = run_sweep(config)
 
     fig_dir = run_dir / args.fig_subdir
