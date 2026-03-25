@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,10 @@ if TYPE_CHECKING:
 _RUN_DIR_RE = re.compile(r"^\d{8}_\d{6}_.+")
 _LATEST_ALIAS_RE = re.compile(r"^latest(?:_[A-Za-z0-9_]+)?$")
 _LATEST_MANIFEST = "latest_runs.json"
+_TRACKED_SNAPSHOT_ALIASES = {
+    "random_mdp": "latest_random_mdp",
+    "chain_bandit": "latest_chain_bandit",
+}
 
 
 def git_commit_hash() -> str:
@@ -141,6 +146,10 @@ def resolve_latest_path(path: str | Path) -> Path:
     if idx is None:
         return p
 
+    alias_root = Path(*parts[: idx + 1]) if idx > 0 else Path(parts[0])
+    if alias_root.exists() and alias_root.is_dir() and not alias_root.is_symlink():
+        return p
+
     if idx == 0:
         results_root = Path("results")
         suffix = Path(*parts[1:]) if len(parts) > 1 else Path()
@@ -176,7 +185,6 @@ def refresh_latest_pointer(results_root: str | Path) -> Optional[Path]:
         env_latest = latest_run_dir_for_env(root, env_name)
         if env_latest is not None:
             alias = f"latest_{env_name}"
-            update_latest_pointer(root, env_latest, alias=alias)
             manifest[alias] = env_latest.name
     save_latest_manifest(root, manifest)
     return root / "latest"
@@ -192,3 +200,31 @@ def update_latest_pointer(results_root: str | Path, run_dir: Path, alias: str = 
         return latest
     except Exception:
         return None
+
+
+def sync_tracked_latest_snapshot(results_root: str | Path, run_dir: str | Path, env_name: str) -> Optional[Path]:
+    alias = _TRACKED_SNAPSHOT_ALIASES.get(env_name)
+    if alias is None:
+        return None
+
+    root = Path(results_root)
+    source = Path(run_dir)
+    snapshot_dir = root / alias
+
+    if snapshot_dir.is_symlink() or snapshot_dir.is_file():
+        snapshot_dir.unlink()
+    elif snapshot_dir.exists():
+        shutil.rmtree(snapshot_dir)
+
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    for name in ["config.yaml", "metadata.json", "sweep_results.csv"]:
+        src = source / name
+        if src.exists():
+            shutil.copy2(src, snapshot_dir / name)
+
+    figures_src = source / "figures"
+    if figures_src.exists() and figures_src.is_dir():
+        shutil.copytree(figures_src, snapshot_dir / "figures")
+
+    return snapshot_dir

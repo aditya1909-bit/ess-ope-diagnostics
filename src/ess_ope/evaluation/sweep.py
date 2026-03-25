@@ -23,7 +23,14 @@ from ess_ope.metrics.confidence import IntervalEstimate, bootstrap_estimator_int
 from ess_ope.metrics.errors import point_error_metrics
 from ess_ope.metrics.ess import weight_summary
 from ess_ope.policies.tabular import TabularPolicy
-from ess_ope.utils.logging import create_run_dir, refresh_latest_pointer, save_results_table, save_run_metadata, update_latest_pointer
+from ess_ope.utils.logging import (
+    create_run_dir,
+    refresh_latest_pointer,
+    save_results_table,
+    save_run_metadata,
+    sync_tracked_latest_snapshot,
+    update_latest_pointer,
+)
 
 
 @dataclass
@@ -546,6 +553,6 @@ def run_sweep(config: SweepConfig) -> Tuple[pd.DataFrame, Path, Path]:
     save_run_metadata(run_dir, config.to_dict())
     result_path = save_results_table(df, run_dir, stem="sweep_results")
     update_latest_pointer(config.results_root, run_dir)
-    update_latest_pointer(config.results_root, run_dir, alias=f"latest_{config.env_name}")
     refresh_latest_pointer(config.results_root)
+    sync_tracked_latest_snapshot(config.results_root, run_dir, config.env_name)
     return df, run_dir, result_path

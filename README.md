@@ -22,7 +22,7 @@ PYTHONPATH=src OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
 ```
 2. Re-analyze any existing results:
 ```bash
-PYTHONPATH=src .venv/bin/python experiments/analyze_results.py --results results/latest_random_mdp/sweep_results.parquet --output-dir results/latest_random_mdp/figures --interval-mode both --ci-level 0.95 --estimators is_pdis,dr_oracle,dm_tabular,fqe_linear
+PYTHONPATH=src .venv/bin/python experiments/analyze_results.py --results results/latest_random_mdp/sweep_results.csv --output-dir results/latest_random_mdp/figures --interval-mode both --ci-level 0.95 --estimators is_pdis,dr_oracle,dm_tabular,fqe_linear
 ```
 
 ## Notebook Workflow
@@ -53,7 +53,7 @@ After a run, see `results/<timestamp>_<name>/`:
 - `figures/paper_claims.csv` (claim-by-claim CI-aware verdicts)
 - `figures/paper_claim_summary.csv` (supported / inconclusive / not_supported breakdown)
 
-`results/latest_runs.json` is tracked in git and records the latest overall run plus the latest run for each benchmark family. The runtime symlinks `results/latest`, `results/latest_random_mdp`, and `results/latest_chain_bandit` are still created locally for convenience.
+`results/latest_runs.json` is tracked in git and records the latest overall run plus the latest run for each benchmark family. The directories `results/latest_random_mdp/` and `results/latest_chain_bandit/` are tracked snapshots containing the newest CSV data and figures for each benchmark family. `results/latest` remains a local convenience symlink to the newest raw timestamped run.
 
 ## Sweep Intensity Controls
 Use these knobs in sweep YAML for stronger evidence:

@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--results",
         type=str,
-        default="results/latest_random_mdp/sweep_results.parquet",
+        default="results/latest_random_mdp/sweep_results.csv",
         help="Path to sweep_results parquet/csv",
     )
     parser.add_argument(

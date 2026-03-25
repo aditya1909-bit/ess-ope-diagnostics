@@ -30,3 +30,7 @@ dist/
 results/*
 !results/.gitkeep
 !results/latest_runs.json
+!results/latest_random_mdp/
+!results/latest_random_mdp/**
+!results/latest_chain_bandit/
+!results/latest_chain_bandit/**
