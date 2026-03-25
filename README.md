@@ -32,9 +32,11 @@ After a run, see `results/<timestamp>_<name>/`:
 - `figures/benchmark_fig2_same_ess_different_error.*`
 - `figures/benchmark_fig3_ess_changes_error_stability.*`
 - `figures/benchmark_fig4_fan_estimate_vs_ess.*`
+- `figures/benchmark_fig5_mean_variance_sensitivity.*` (for chain-bandit sweeps)
 - `figures/benchmark_report.csv`
 - `figures/estimator_summary.csv` (global estimator stats + bootstrap CI for ESS-error correlations)
 - `figures/condition_summary.csv` (per `(alpha,beta,K)` error means + CI)
+- `figures/chain_bandit_sensitivity_summary.csv` (how reward mean scale, reward gap, reward variance, and transition strength move error and ESS)
 - `figures/paper_claims.csv` (claim-by-claim CI-aware verdicts)
 - `figures/paper_claim_summary.csv` (supported / inconclusive / not_supported breakdown)
 
@@ -54,6 +56,8 @@ Profiles:
 - `configs/sweeps/random_mdp_robust.yaml`: strong default benchmark
 - `configs/sweeps/random_mdp_intensive.yaml`: 20x `robust` row count for tighter estimates
 - `configs/sweeps/random_mdp_ultra.yaml`: higher-than-intensive run for maximum stability
+- `configs/sweeps/chain_bandit_baseline.yaml`: layered chain-of-bandits benchmark with explicit reward mean/variance sweeps
+- `configs/sweeps/chain_bandit_focused.yaml`: notebook-friendly chain-bandit run focused on mean/variance effects with full-machine multiprocessing defaults for this M3 Pro setup
 
 ## Apple Silicon (Mac) Efficiency
 - Parallelism is enabled via sweep config (`num_workers`, `mp_chunksize`) using multiprocessing `spawn`, which is the stable mode on macOS.
@@ -77,6 +81,20 @@ Disable with `--no-paper-mode` if you only want figures + base summaries.
 ## Environments
 - `RandomMDP`: sparse transitions + misspecification knob (`beta`)
 - `Gridworld`: interpretable baseline
+- `ChainBanditEnv`: layered chain of bandit-like decisions; supports `reward_only` and `transitional` variants plus separate reward mean and reward variance sweeps
+
+## Chain Bandit Benchmark
+Use the chain benchmark when you want a simpler sequential testbed than a fully random MDP:
+```bash
+python experiments/run_benchmark.py --config configs/sweeps/chain_bandit_baseline.yaml
+```
+
+Main chain-bandit sweep knobs:
+- `transition_strengths`: how strongly actions affect the next state
+- `reward_mean_scales`: overall signal level in reward means
+- `reward_gaps`: separation between the preferred arm and the others
+- `reward_stds`: reward noise level, independent of the reward means
+- `chain_variants`: `reward_only` keeps transitions action-independent; `transitional` makes the problem genuinely sequential
 
 ## Reproducibility
 Each sweep run stores:

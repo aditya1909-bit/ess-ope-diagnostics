@@ -54,9 +54,8 @@ def compute_importance_weights(
 
 
 def trajectory_is(dataset: EpisodeDataset, episode_weights: np.ndarray, gamma: float = 1.0) -> float:
-    discounts = gamma ** np.arange(dataset.horizon)
-    returns = np.sum(dataset.rewards * discounts[None, :], axis=1)
-    return float(np.mean(episode_weights * returns))
+    contributions = trajectory_is_episode_contributions(dataset, episode_weights, gamma=gamma)
+    return float(np.mean(contributions))
 
 
 def weighted_trajectory_is(dataset: EpisodeDataset, episode_weights: np.ndarray, gamma: float = 1.0) -> float:
@@ -69,8 +68,8 @@ def weighted_trajectory_is(dataset: EpisodeDataset, episode_weights: np.ndarray,
 
 
 def per_decision_is(dataset: EpisodeDataset, partial_weights: np.ndarray, gamma: float = 1.0) -> float:
-    discounts = gamma ** np.arange(dataset.horizon)
-    return float(np.mean(np.sum(partial_weights * dataset.rewards * discounts[None, :], axis=1)))
+    contributions = per_decision_is_episode_contributions(dataset, partial_weights, gamma=gamma)
+    return float(np.mean(contributions))
 
 
 def weighted_per_decision_is(dataset: EpisodeDataset, partial_weights: np.ndarray, gamma: float = 1.0) -> float:
@@ -83,6 +82,25 @@ def weighted_per_decision_is(dataset: EpisodeDataset, partial_weights: np.ndarra
             continue
         estimate += discounts[t] * float(np.sum(w_t * dataset.rewards[:, t]) / denom)
     return estimate
+
+
+def trajectory_is_episode_contributions(
+    dataset: EpisodeDataset,
+    episode_weights: np.ndarray,
+    gamma: float = 1.0,
+) -> np.ndarray:
+    discounts = gamma ** np.arange(dataset.horizon)
+    returns = np.sum(dataset.rewards * discounts[None, :], axis=1)
+    return np.asarray(episode_weights, dtype=float) * returns
+
+
+def per_decision_is_episode_contributions(
+    dataset: EpisodeDataset,
+    partial_weights: np.ndarray,
+    gamma: float = 1.0,
+) -> np.ndarray:
+    discounts = gamma ** np.arange(dataset.horizon)
+    return np.sum(partial_weights * dataset.rewards * discounts[None, :], axis=1)
 
 
 def is_family_estimates(

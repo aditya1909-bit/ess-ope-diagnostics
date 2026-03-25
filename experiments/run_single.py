@@ -11,14 +11,16 @@ from ess_ope.estimators.dm_fqe import direct_model_tabular, fitted_q_evaluation
 from ess_ope.estimators.dr import doubly_robust_estimate
 from ess_ope.estimators import is_family_estimates
 from ess_ope.estimators.mrdr import mrdr_linear_estimate
+from ess_ope.envs.chain_bandit import ChainBanditConfig, ChainBanditEnv
 from ess_ope.envs.random_mdp import RandomMDP, RandomMDPConfig
 from ess_ope.evaluation.ground_truth import dynamic_programming_value
 from ess_ope.metrics.ess import weight_summary
-from ess_ope.policies.softmax import softmax_policy_from_logits, statewise_kl
+from ess_ope.policies.tabular import TabularPolicy
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a single OPE diagnostics condition")
+    parser.add_argument("--env-name", type=str, default="random_mdp", choices=["random_mdp", "chain_bandit"])
     parser.add_argument("--alpha", type=float, required=True)
     parser.add_argument("--beta", type=float, required=True)
     parser.add_argument("--episodes", type=int, required=True)
@@ -28,29 +30,68 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--horizon", type=int, default=20)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--gamma", type=float, default=1.0)
+    parser.add_argument("--transition-strength", type=float, default=0.5)
+    parser.add_argument("--reward-mean-scale", type=float, default=1.0)
+    parser.add_argument("--reward-gap", type=float, default=0.5)
+    parser.add_argument("--reward-std", type=float, default=0.5)
+    parser.add_argument("--variant", type=str, default="transitional", choices=["reward_only", "transitional"])
+    parser.add_argument("--linear-feature-dim", type=int, default=12)
     return parser.parse_args()
+
+
+def _softmax_policy_from_logits(logits: np.ndarray, temperature: float) -> TabularPolicy:
+    scaled = np.asarray(logits, dtype=float) / max(temperature, 1e-8)
+    shifted = scaled - np.max(scaled, axis=-1, keepdims=True)
+    probs = np.exp(shifted)
+    probs = probs / np.sum(probs, axis=-1, keepdims=True)
+    return TabularPolicy(probs)
+
+
+def _statewise_kl(target_policy: TabularPolicy, behavior_policy: TabularPolicy) -> np.ndarray:
+    p = np.clip(target_policy.probs, 1e-12, 1.0)
+    q = np.clip(behavior_policy.probs, 1e-12, 1.0)
+    return np.sum(p * (np.log(p) - np.log(q)), axis=-1).reshape(-1)
 
 
 def main() -> None:
     args = parse_args()
 
-    env = RandomMDP.generate(
-        RandomMDPConfig(
-            num_states=args.states,
-            num_actions=args.actions,
-            horizon=args.horizon,
-            beta=args.beta,
-            seed=args.seed,
+    if args.env_name == "chain_bandit":
+        env = ChainBanditEnv.generate(
+            ChainBanditConfig(
+                num_states=args.states,
+                num_actions=args.actions,
+                horizon=args.horizon,
+                linear_feature_dim=args.linear_feature_dim,
+                transition_strength=args.transition_strength,
+                reward_mean_scale=args.reward_mean_scale,
+                reward_gap=args.reward_gap,
+                reward_std=args.reward_std,
+                beta=args.beta,
+                variant=args.variant,
+                seed=args.seed,
+            )
         )
-    )
+        policy_shape = (env.horizon, env.num_states, env.num_actions)
+    else:
+        env = RandomMDP.generate(
+            RandomMDPConfig(
+                num_states=args.states,
+                num_actions=args.actions,
+                horizon=args.horizon,
+                beta=args.beta,
+                seed=args.seed,
+            )
+        )
+        policy_shape = (env.num_states, env.num_actions)
 
     rng = np.random.default_rng(args.seed)
-    theta_target = rng.normal(size=(env.num_states, env.num_actions))
-    theta_random = rng.normal(size=(env.num_states, env.num_actions))
+    theta_target = rng.normal(size=policy_shape)
+    theta_random = rng.normal(size=policy_shape)
     theta_behavior = (1.0 - args.alpha) * theta_target + args.alpha * theta_random
 
-    target = softmax_policy_from_logits(theta_target, temperature=args.temperature)
-    behavior = softmax_policy_from_logits(theta_behavior, temperature=args.temperature)
+    target = _softmax_policy_from_logits(theta_target, temperature=args.temperature)
+    behavior = _softmax_policy_from_logits(theta_behavior, temperature=args.temperature)
 
     truth = dynamic_programming_value(env, target, gamma=args.gamma)
 
@@ -111,8 +152,14 @@ def main() -> None:
         "alpha": args.alpha,
         "beta": args.beta,
         "episodes": args.episodes,
+        "env_name": args.env_name,
+        "transition_strength": args.transition_strength,
+        "reward_mean_scale": args.reward_mean_scale,
+        "reward_gap": args.reward_gap,
+        "reward_std": args.reward_std,
+        "variant": args.variant,
         "v_true": truth.value,
-        "state_kl_mean": float(np.mean(statewise_kl(target, behavior))),
+        "state_kl_mean": float(np.mean(_statewise_kl(target, behavior))),
         **weight_summary(np.asarray(is_res["episode_weights"])),
         "estimate_is_trajectory": float(is_res["is_trajectory"]),
         "estimate_wis_trajectory": float(is_res["wis_trajectory"]),

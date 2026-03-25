@@ -1,0 +1,30 @@
+name: random_mdp_ci_focused
+results_root: results
+gamma: 1.0
+temperature: 1.0
+
+seeds: [0, 1, 2]
+alphas: [0.2, 0.6]
+betas: [0.0, 0.5]
+dataset_sizes: [100]
+env_repeats: 1
+policy_repeats: 1
+dataset_repeats: 12
+num_workers: 2
+mp_chunksize: 1
+
+analysis_estimators: [is_pdis, dr_oracle, dm_tabular, fqe_linear]
+interval_mode: both
+ci_level: 0.95
+ci_bootstrap_samples: 100
+
+fqe_l2_reg: 0.0001
+mrdr_l2_reg: 0.001
+
+env:
+  num_states: 60
+  num_actions: 5
+  horizon: 12
+  branch_factor: 3
+  linear_feature_dim: 10
+  reward_noise_std: 0.0

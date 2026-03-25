@@ -1,0 +1,31 @@
+name: chain_bandit_focused
+env_name: chain_bandit
+results_root: results
+gamma: 1.0
+temperature: 1.0
+
+seeds: [0, 1, 2]
+alphas: [0.1, 0.3, 0.6]
+betas: [0.0, 0.3, 0.6]
+dataset_sizes: [200, 1000]
+
+transition_strengths: [0.0, 1.0]
+reward_mean_scales: [0.5, 1.0, 2.0]
+reward_gaps: [0.5]
+reward_stds: [0.1, 0.5, 1.0]
+chain_variants: [reward_only, transitional]
+
+env_repeats: 1
+policy_repeats: 1
+dataset_repeats: 3
+num_workers: 11
+mp_chunksize: 4
+
+fqe_l2_reg: 0.0001
+mrdr_l2_reg: 0.001
+
+env:
+  num_states: 3
+  num_actions: 5
+  horizon: 10
+  linear_feature_dim: 12

@@ -17,6 +17,27 @@ def doubly_robust_estimate(
     min_prob: float = 1e-12,
 ) -> float:
     """Finite-horizon per-decision doubly robust estimate."""
+    contributions = doubly_robust_episode_contributions(
+        dataset=dataset,
+        target_policy=target_policy,
+        behavior_policy=behavior_policy,
+        q_hat=q_hat,
+        v_hat=v_hat,
+        gamma=gamma,
+        min_prob=min_prob,
+    )
+    return float(np.mean(contributions))
+
+
+def doubly_robust_episode_contributions(
+    dataset: EpisodeDataset,
+    target_policy: TabularPolicy,
+    behavior_policy: TabularPolicy,
+    q_hat: np.ndarray,
+    v_hat: np.ndarray,
+    gamma: float = 1.0,
+    min_prob: float = 1e-12,
+) -> np.ndarray:
     weights = compute_importance_weights(
         dataset=dataset,
         target_policy=target_policy,
@@ -41,4 +62,4 @@ def doubly_robust_estimate(
             dr += weights.partial_weights[ep, t] * td
         estimates[ep] = dr
 
-    return float(np.mean(estimates))
+    return estimates

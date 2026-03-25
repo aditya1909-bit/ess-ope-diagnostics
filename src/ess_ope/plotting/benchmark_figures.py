@@ -7,14 +7,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from ess_ope.evaluation.summary import (
+    build_bias_variance_summary,
+    build_ci_coverage_summary,
+    build_ci_interval_summary,
+)
 from ess_ope.plotting.utils import save_figure
 
 
 ESTIMATOR_SPECS: List[Tuple[str, str]] = [
     ("is_pdis", "IS-PDIS"),
+    ("dr_oracle", "DR"),
     ("dm_tabular", "DM"),
     ("fqe_linear", "FQE"),
-    ("mrdr", "MRDR"),
 ]
 
 
@@ -234,7 +239,7 @@ def figure_1_ess_vs_error_by_estimator(df: pd.DataFrame, output_dir: str | Path)
             frameon=True,
         )
 
-    fig.suptitle("ESS as reliability signal: IS vs DM/FQE/MRDR", y=0.99)
+    fig.suptitle("ESS as reliability signal: IS, DR, DM, and FQE", y=0.99)
     fig.tight_layout(rect=[0.02, 0.08, 0.98, 0.95])
     save_figure(fig, output_dir, "benchmark_fig1_ess_vs_error_by_estimator")
 
@@ -317,9 +322,9 @@ def figure_3_ess_changes_error_stability(
 
     colors = {
         "IS-PDIS": "#444444",
+        "DR": "#ff7f0e",
         "DM": "#1f77b4",
         "FQE": "#d62728",
-        "MRDR": "#2ca02c",
     }
     for key, label in estimators:
         y_col = f"abs_error_{key}"
@@ -444,16 +449,282 @@ def estimator_report(
     return pd.DataFrame(rows)
 
 
+def figure_5_mean_variance_sensitivity(df: pd.DataFrame, output_dir: str | Path) -> None:
+    if "reward_mean_scale" not in df.columns or "reward_std" not in df.columns:
+        return
+
+    work = df.copy()
+    if "env_name" in work.columns:
+        work = work[work["env_name"] == "chain_bandit"].copy()
+    if work.empty:
+        return
+
+    _base_style()
+    estimators = _available_estimators(work, ESTIMATOR_SPECS)
+    if not estimators:
+        return
+
+    work["ess_norm"] = _x_ess_norm(work)
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9), squeeze=False)
+    colors = {
+        "IS-PDIS": "#444444",
+        "DR": "#ff7f0e",
+        "DM": "#1f77b4",
+        "FQE": "#d62728",
+    }
+
+    ax = axes[0, 0]
+    _style_axis(ax)
+    mean_axis = (
+        work.groupby("reward_mean_scale", as_index=False)
+        .agg(median_ess_norm=("ess_norm", "median"))
+        .sort_values("reward_mean_scale")
+    )
+    for key, label in estimators:
+        err_axis = (
+            work.groupby("reward_mean_scale", as_index=False)
+            .agg(median_abs_error=(f"abs_error_{key}", "median"))
+            .sort_values("reward_mean_scale")
+        )
+        ax.plot(
+            err_axis["reward_mean_scale"],
+            err_axis["median_abs_error"],
+            marker="o",
+            linewidth=2.0,
+            color=colors.get(label),
+            label=label,
+        )
+    ax.set_title("A. Error vs reward mean scale")
+    ax.set_xlabel("Reward Mean Scale")
+    ax.set_ylabel("Median Absolute Error")
+
+    ax = axes[0, 1]
+    _style_axis(ax)
+    std_axis = (
+        work.groupby("reward_std", as_index=False)
+        .agg(median_ess_norm=("ess_norm", "median"))
+        .sort_values("reward_std")
+    )
+    for key, label in estimators:
+        err_axis = (
+            work.groupby("reward_std", as_index=False)
+            .agg(median_abs_error=(f"abs_error_{key}", "median"))
+            .sort_values("reward_std")
+        )
+        ax.plot(
+            err_axis["reward_std"],
+            err_axis["median_abs_error"],
+            marker="o",
+            linewidth=2.0,
+            color=colors.get(label),
+            label=label,
+        )
+    ax.set_title("B. Error vs reward variance scale")
+    ax.set_xlabel("Reward Std")
+    ax.set_ylabel("Median Absolute Error")
+
+    ax = axes[1, 0]
+    _style_axis(ax)
+    ax.plot(
+        mean_axis["reward_mean_scale"],
+        mean_axis["median_ess_norm"],
+        marker="o",
+        linewidth=2.2,
+        color="#6a3d9a",
+    )
+    ax.set_title("C. ESS vs reward mean scale")
+    ax.set_xlabel("Reward Mean Scale")
+    ax.set_ylabel("Median Normalized ESS")
+
+    ax = axes[1, 1]
+    _style_axis(ax)
+    ax.plot(
+        std_axis["reward_std"],
+        std_axis["median_ess_norm"],
+        marker="o",
+        linewidth=2.2,
+        color="#6a3d9a",
+    )
+    ax.set_title("D. ESS vs reward variance scale")
+    ax.set_xlabel("Reward Std")
+    ax.set_ylabel("Median Normalized ESS")
+
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.01), ncol=min(4, len(handles)), frameon=True)
+
+    fig.suptitle("Chain-bandit sensitivity: reward mean and variance effects", y=0.99)
+    fig.tight_layout(rect=[0.02, 0.06, 0.98, 0.95])
+    save_figure(fig, output_dir, "benchmark_fig5_mean_variance_sensitivity")
+
+
+def figure_6_ess_bias_variance_mse(
+    bias_variance_summary: pd.DataFrame,
+    output_dir: str | Path,
+) -> None:
+    if bias_variance_summary.empty:
+        return
+
+    _base_style()
+    metrics = [
+        ("abs_bias", "Absolute Bias"),
+        ("variance", "Variance"),
+        ("mse", "MSE"),
+        ("mean_abs_error", "Mean Absolute Error"),
+    ]
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9), squeeze=False)
+    colors = {"IS-PDIS": "#444444", "DR": "#ff7f0e", "DM": "#1f77b4", "FQE": "#d62728"}
+
+    for ax, (metric, title) in zip(axes.reshape(-1), metrics):
+        _style_axis(ax)
+        for estimator in sorted(bias_variance_summary["estimator"].unique()):
+            sub = bias_variance_summary[bias_variance_summary["estimator"] == estimator].sort_values("median_ess_norm")
+            ax.plot(
+                sub["median_ess_norm"],
+                sub[metric],
+                marker="o",
+                linewidth=1.8,
+                label=estimator,
+                color=colors.get(estimator, None),
+            )
+        ax.set_xlabel("Median Normalized ESS")
+        ax.set_ylabel(title)
+        ax.set_title(title)
+
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.01), ncol=min(4, len(handles)), frameon=True)
+    fig.suptitle("Bias / variance / error vs matched ESS conditions", y=0.99)
+    fig.tight_layout(rect=[0.02, 0.06, 0.98, 0.95])
+    save_figure(fig, output_dir, "benchmark_fig6_ess_bias_variance_mse")
+
+
+def figure_7_matched_ess_risk_curves(
+    df: pd.DataFrame,
+    output_dir: str | Path,
+) -> None:
+    work = df.copy()
+    work["ess_norm"] = _x_ess_norm(work)
+    if work.empty or work["ess_norm"].nunique() < 2:
+        return
+
+    _base_style()
+    bins = pd.qcut(work["ess_norm"], q=min(6, max(2, work["ess_norm"].nunique())), duplicates="drop")
+    fig, ax = plt.subplots(figsize=(10.5, 6.5))
+    _style_axis(ax)
+    colors = {"IS-PDIS": "#444444", "DR": "#ff7f0e", "DM": "#1f77b4", "FQE": "#d62728"}
+
+    for key, label in _available_estimators(work, ESTIMATOR_SPECS):
+        err_col = f"abs_error_{key}"
+        tmp = pd.DataFrame({"bin": bins, "ess_norm": work["ess_norm"], "abs_error": work[err_col]})
+        agg = tmp.groupby("bin", dropna=False).agg(mean_ess_norm=("ess_norm", "mean"), mean_abs_error=("abs_error", "mean")).reset_index()
+        ax.plot(
+            agg["mean_ess_norm"],
+            agg["mean_abs_error"],
+            marker="o",
+            linewidth=2.0,
+            label=label,
+            color=colors.get(label, None),
+        )
+
+    ax.set_xlabel("Matched ESS Bin Center")
+    ax.set_ylabel("Mean Absolute Error")
+    ax.set_title("Matched-ESS risk curves across estimators")
+    ax.legend(frameon=True, ncol=2)
+    fig.tight_layout()
+    save_figure(fig, output_dir, "benchmark_fig7_matched_ess_risk_curves")
+
+
+def figure_8_ci_coverage_width(
+    ci_coverage_summary: pd.DataFrame,
+    output_dir: str | Path,
+) -> None:
+    if ci_coverage_summary.empty:
+        return
+
+    _base_style()
+    fig, (ax_cov, ax_width) = plt.subplots(1, 2, figsize=(13, 5.5))
+    _style_axis(ax_cov)
+    _style_axis(ax_width)
+
+    plot_df = ci_coverage_summary.copy()
+    plot_df["label"] = plot_df["estimator"].astype(str) + "\n" + plot_df["ci_method"].astype(str)
+    x = np.arange(len(plot_df))
+
+    ax_cov.bar(x, plot_df["coverage_rate"], color="#4c78a8")
+    ax_cov.axhline(0.95, color="black", linestyle="--", linewidth=1.5)
+    ax_cov.set_xticks(x, plot_df["label"], rotation=45, ha="right")
+    ax_cov.set_ylabel("Coverage Rate")
+    ax_cov.set_title("A. CI calibration by estimator")
+
+    ax_width.bar(x, plot_df["mean_width"], color="#f58518")
+    ax_width.set_xticks(x, plot_df["label"], rotation=45, ha="right")
+    ax_width.set_ylabel("Mean Interval Width")
+    ax_width.set_title("B. CI width by estimator")
+
+    fig.tight_layout()
+    save_figure(fig, output_dir, "benchmark_fig8_ci_coverage_width")
+
+
+def figure_9_ci_method_comparison(
+    ci_coverage_summary: pd.DataFrame,
+    output_dir: str | Path,
+) -> None:
+    if ci_coverage_summary.empty:
+        return
+
+    plot_df = ci_coverage_summary[
+        ci_coverage_summary["estimator"].isin(["IS-PDIS", "DR"])
+        & ci_coverage_summary["ci_method"].isin(["analytic", "bootstrap"])
+    ].copy()
+    if plot_df.empty:
+        return
+
+    _base_style()
+    fig, (ax_gap, ax_ratio) = plt.subplots(1, 2, figsize=(12, 5.5))
+    _style_axis(ax_gap)
+    _style_axis(ax_ratio)
+
+    labels = plot_df["estimator"].astype(str) + "\n" + plot_df["ci_method"].astype(str)
+    x = np.arange(len(plot_df))
+
+    ax_gap.bar(x, plot_df["coverage_gap"], color="#54a24b")
+    ax_gap.axhline(0.0, color="black", linestyle="--", linewidth=1.5)
+    ax_gap.set_xticks(x, labels, rotation=45, ha="right")
+    ax_gap.set_ylabel("Coverage Gap")
+    ax_gap.set_title("A. Analytic vs bootstrap coverage gap")
+
+    ax_ratio.bar(x, plot_df["bias_to_half_width_ratio"], color="#e45756")
+    ax_ratio.set_xticks(x, labels, rotation=45, ha="right")
+    ax_ratio.set_ylabel("|Bias| / Mean Half-Width")
+    ax_ratio.set_title("B. Bias relative to CI half-width")
+
+    fig.tight_layout()
+    save_figure(fig, output_dir, "benchmark_fig9_ci_method_comparison")
+
+
 def generate_benchmark_figures(
     df: pd.DataFrame,
     output_dir: str | Path,
     fixed_alpha: Optional[float] = None,
     fixed_beta: float = 0.0,
+    bias_variance_summary: Optional[pd.DataFrame] = None,
+    ci_interval_summary: Optional[pd.DataFrame] = None,
+    ci_coverage_summary: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     figure_1_ess_vs_error_by_estimator(df, output_dir)
     selected_alpha = figure_2_same_ess_different_error(df, output_dir, fixed_alpha=fixed_alpha)
     figure_3_ess_changes_error_stability(df, output_dir, fixed_beta=fixed_beta)
     fan_meta = figure_4_fan_estimate_vs_ess(df, output_dir)
+    figure_5_mean_variance_sensitivity(df, output_dir)
+    bias_var = bias_variance_summary if bias_variance_summary is not None else build_bias_variance_summary(df)
+    ci_intervals = ci_interval_summary if ci_interval_summary is not None else build_ci_interval_summary(df)
+    ci_coverage = ci_coverage_summary if ci_coverage_summary is not None else build_ci_coverage_summary(ci_intervals)
+    figure_6_ess_bias_variance_mse(bias_var, output_dir)
+    figure_7_matched_ess_risk_curves(df, output_dir)
+    figure_8_ci_coverage_width(ci_coverage, output_dir)
+    figure_9_ci_method_comparison(ci_coverage, output_dir)
 
     report = estimator_report(df, fixed_alpha=selected_alpha, fixed_beta=fixed_beta)
     if report.empty:

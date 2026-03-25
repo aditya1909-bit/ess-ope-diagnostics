@@ -33,12 +33,19 @@ class PaperClaimConfig:
 
 ESTIMATOR_LABEL_TO_KEY = {
     "IS-PDIS": "is_pdis",
+    "DR": "dr_oracle",
     "DM": "dm_tabular",
     "FQE": "fqe_linear",
     "MRDR": "mrdr",
 }
 
 ESTIMATOR_KEY_TO_LABEL = {v: k for k, v in ESTIMATOR_LABEL_TO_KEY.items()}
+FOCUSED_ESTIMATOR_SPECS = [
+    ("is_pdis", "IS-PDIS"),
+    ("dr_oracle", "DR"),
+    ("dm_tabular", "DM"),
+    ("fqe_linear", "FQE"),
+]
 
 
 def _default_estimator_keys(df: pd.DataFrame) -> List[str]:
@@ -49,6 +56,11 @@ def _default_estimator_keys(df: pd.DataFrame) -> List[str]:
             if f"estimate_{key}" in df.columns and f"error_{key}" in df.columns:
                 keys.append(key)
     return sorted(keys)
+
+
+def _focused_estimator_keys(df: pd.DataFrame) -> List[str]:
+    keys = [key for key, _ in FOCUSED_ESTIMATOR_SPECS if f"estimate_{key}" in df.columns]
+    return keys or _default_estimator_keys(df)
 
 
 def _mean_ci(values: np.ndarray, ci_level: float) -> tuple[float, float, float, float]:
@@ -226,12 +238,20 @@ def build_estimator_summary(
 def build_condition_summary(
     df: pd.DataFrame,
     estimator_keys: Sequence[str] | None = None,
-    group_cols: Iterable[str] = ("alpha", "beta", "K"),
+    group_cols: Iterable[str] | None = None,
     ci_level: float = 0.95,
     show_progress: bool = False,
 ) -> pd.DataFrame:
     keys = list(estimator_keys) if estimator_keys is not None else _default_estimator_keys(df)
-    gcols = list(group_cols)
+    if group_cols is None:
+        default_cols = ["alpha", "beta", "K"]
+        chain_cols = ["chain_variant", "transition_strength", "reward_mean_scale", "reward_gap", "reward_std"]
+        for col in chain_cols:
+            if col in df.columns:
+                default_cols.append(col)
+        gcols = [col for col in default_cols if col in df.columns]
+    else:
+        gcols = list(group_cols)
 
     ess_norm = df["ess_is_over_k"] if "ess_is_over_k" in df else (df["ess_is"] / df["K"].clip(lower=1))
     base = df.assign(_ess_norm=ess_norm)
@@ -272,6 +292,376 @@ def build_condition_summary(
     out = pd.concat(frames, ignore_index=True)
     sort_cols = [c for c in ["estimator", *gcols] if c in out.columns]
     return out.sort_values(sort_cols).reset_index(drop=True)
+
+
+def build_chain_bandit_sensitivity_summary(
+    df: pd.DataFrame,
+    estimator_keys: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    if "reward_mean_scale" not in df.columns or "reward_std" not in df.columns:
+        return pd.DataFrame()
+
+    work = df.copy()
+    if "env_name" in work.columns:
+        work = work[work["env_name"] == "chain_bandit"].copy()
+    if work.empty:
+        return pd.DataFrame()
+
+    keys = list(estimator_keys) if estimator_keys is not None else _default_estimator_keys(work)
+    work["_ess_norm"] = (
+        work["ess_is_over_k"]
+        if "ess_is_over_k" in work.columns
+        else work["ess_is"] / work["K"].clip(lower=1)
+    )
+
+    axes = [col for col in ["reward_mean_scale", "reward_gap", "reward_std", "transition_strength"] if col in work.columns]
+    condition_axes = [col for col in ["alpha", "beta", "K", "chain_variant", *axes] if col in work.columns]
+
+    rows: List[dict] = []
+    for axis in axes:
+        axis_values = np.sort(work[axis].dropna().unique())
+        if len(axis_values) < 2:
+            continue
+
+        axis_min = float(axis_values[0])
+        axis_max = float(axis_values[-1])
+        controls = [col for col in condition_axes if col != axis]
+
+        ess_axis = (
+            work.groupby(axis, as_index=False)
+            .agg(mean_ess_norm=("_ess_norm", "mean"), median_ess_norm=("_ess_norm", "median"))
+            .sort_values(axis)
+        )
+
+        for key in keys:
+            err_col = f"abs_error_{key}"
+            if err_col not in work.columns:
+                continue
+
+            axis_err = (
+                work.groupby(axis, as_index=False)
+                .agg(mean_abs_error=(err_col, "mean"), median_abs_error=(err_col, "median"))
+                .sort_values(axis)
+            )
+
+            pair_rows: List[dict] = []
+            agg = (
+                work.groupby([*controls, axis], as_index=False)
+                .agg(mean_abs_error=(err_col, "mean"), mean_ess_norm=("_ess_norm", "mean"))
+                .sort_values(axis)
+            )
+
+            if controls:
+                grouped = agg.groupby(controls, dropna=False)
+            else:
+                grouped = [((), agg)]
+
+            for _, g in grouped:
+                g = g.sort_values(axis)
+                if g[axis].nunique() < 2:
+                    continue
+                low = g.iloc[0]
+                high = g.iloc[-1]
+                pair_rows.append(
+                    {
+                        "delta_axis": float(high[axis] - low[axis]),
+                        "delta_abs_error": float(high["mean_abs_error"] - low["mean_abs_error"]),
+                        "delta_ess_norm": float(high["mean_ess_norm"] - low["mean_ess_norm"]),
+                    }
+                )
+
+            pair_df = pd.DataFrame(pair_rows)
+            rows.append(
+                {
+                    "axis": axis,
+                    "estimator": key,
+                    "axis_min": axis_min,
+                    "axis_max": axis_max,
+                    "corr_axis_abs_error": float(work[axis].corr(work[err_col], method="pearson")),
+                    "corr_axis_ess_norm": float(work[axis].corr(work["_ess_norm"], method="pearson")),
+                    "mean_abs_error_at_axis_min": float(axis_err.iloc[0]["mean_abs_error"]),
+                    "mean_abs_error_at_axis_max": float(axis_err.iloc[-1]["mean_abs_error"]),
+                    "median_abs_error_at_axis_min": float(axis_err.iloc[0]["median_abs_error"]),
+                    "median_abs_error_at_axis_max": float(axis_err.iloc[-1]["median_abs_error"]),
+                    "mean_ess_norm_at_axis_min": float(ess_axis.iloc[0]["mean_ess_norm"]),
+                    "mean_ess_norm_at_axis_max": float(ess_axis.iloc[-1]["mean_ess_norm"]),
+                    "median_ess_norm_at_axis_min": float(ess_axis.iloc[0]["median_ess_norm"]),
+                    "median_ess_norm_at_axis_max": float(ess_axis.iloc[-1]["median_ess_norm"]),
+                    "n_pairs": int(len(pair_df)),
+                    "mean_delta_abs_error_low_to_high": float(pair_df["delta_abs_error"].mean()) if not pair_df.empty else np.nan,
+                    "mean_delta_ess_norm_low_to_high": float(pair_df["delta_ess_norm"].mean()) if not pair_df.empty else np.nan,
+                    "frac_error_increases_low_to_high": float((pair_df["delta_abs_error"] > 0).mean()) if not pair_df.empty else np.nan,
+                    "frac_ess_increases_low_to_high": float((pair_df["delta_ess_norm"] > 0).mean()) if not pair_df.empty else np.nan,
+                }
+            )
+
+    if not rows:
+        return pd.DataFrame()
+
+    out = pd.DataFrame(rows)
+    return out.sort_values(["axis", "estimator"]).reset_index(drop=True)
+
+
+def _default_repeat_group_cols(df: pd.DataFrame) -> List[str]:
+    candidates = [
+        "env_name",
+        "env_id",
+        "policy_seed",
+        "alpha",
+        "beta",
+        "K",
+        "transition_strength",
+        "reward_mean_scale",
+        "reward_gap",
+        "reward_std",
+        "chain_variant",
+    ]
+    return [col for col in candidates if col in df.columns]
+
+
+def build_bias_variance_summary(
+    df: pd.DataFrame,
+    estimator_keys: Sequence[str] | None = None,
+    group_cols: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    keys = list(estimator_keys) if estimator_keys is not None else _focused_estimator_keys(df)
+    gcols = list(group_cols) if group_cols is not None else _default_repeat_group_cols(df)
+    if not gcols:
+        return pd.DataFrame()
+
+    work = df.copy()
+    work["_ess_norm"] = work["ess_is_over_k"] if "ess_is_over_k" in work.columns else (work["ess_is"] / work["K"].clip(lower=1))
+    frames: List[pd.DataFrame] = []
+
+    for key in keys:
+        estimate_col = f"estimate_{key}"
+        error_col = f"error_{key}"
+        abs_error_col = f"abs_error_{key}"
+        sq_error_col = f"squared_error_{key}"
+        if any(col not in work.columns for col in [estimate_col, error_col, abs_error_col, sq_error_col]):
+            continue
+
+        agg = (
+            work.groupby(gcols, dropna=False)
+            .agg(
+                n=(estimate_col, "size"),
+                v_true=("v_true", "mean"),
+                mean_estimate=(estimate_col, "mean"),
+                bias=(error_col, "mean"),
+                mse=(sq_error_col, "mean"),
+                mean_abs_error=(abs_error_col, "mean"),
+                median_abs_error=(abs_error_col, "median"),
+                median_ess_is=("ess_is", "median"),
+                median_ess_norm=("_ess_norm", "median"),
+            )
+            .reset_index()
+        )
+        variance = (
+            work.groupby(gcols, dropna=False)[estimate_col]
+            .apply(lambda s: float(np.mean((np.asarray(s, dtype=float) - float(np.mean(s))) ** 2)))
+            .reset_index(name="variance")
+        )
+        agg = agg.merge(variance, on=gcols, how="left")
+        agg["bias_squared"] = agg["bias"] ** 2
+        agg["abs_bias"] = agg["bias"].abs()
+        agg["estimator"] = key
+        frames.append(agg)
+
+    if not frames:
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True)
+    sort_cols = [c for c in ["estimator", *gcols] if c in out.columns]
+    return out.sort_values(sort_cols).reset_index(drop=True)
+
+
+def build_ci_interval_summary(
+    df: pd.DataFrame,
+    estimator_keys: Sequence[str] | None = None,
+    methods: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    keys = list(estimator_keys) if estimator_keys is not None else _focused_estimator_keys(df)
+    chosen_methods = list(methods) if methods is not None else ["analytic", "bootstrap"]
+
+    base_cols = [
+        "env_name",
+        "env_id",
+        "dataset_seed",
+        "policy_seed",
+        "seed",
+        "alpha",
+        "beta",
+        "K",
+        "chain_variant",
+        "transition_strength",
+        "reward_mean_scale",
+        "reward_gap",
+        "reward_std",
+        "v_true",
+        "ess_is",
+        "ess_is_over_k",
+    ]
+    present_base = [col for col in base_cols if col in df.columns]
+    frames: List[pd.DataFrame] = []
+
+    for key in keys:
+        estimate_col = f"estimate_{key}"
+        error_col = f"error_{key}"
+        abs_error_col = f"abs_error_{key}"
+        sq_error_col = f"squared_error_{key}"
+        if any(col not in df.columns for col in [estimate_col, error_col, abs_error_col, sq_error_col]):
+            continue
+        label = ESTIMATOR_KEY_TO_LABEL.get(key, key)
+        for method in chosen_methods:
+            low_col = f"ci_{method}_low_{key}"
+            high_col = f"ci_{method}_high_{key}"
+            width_col = f"ci_{method}_width_{key}"
+            covered_col = f"ci_{method}_covered_{key}"
+            if low_col not in df.columns or high_col not in df.columns:
+                continue
+
+            sub = df[present_base + [estimate_col, error_col, abs_error_col, sq_error_col, low_col, high_col]].copy()
+            sub["ci_width"] = (
+                df[width_col].to_numpy()
+                if width_col in df.columns
+                else (df[high_col] - df[low_col]).to_numpy()
+            )
+            sub["covered"] = (
+                df[covered_col].to_numpy()
+                if covered_col in df.columns
+                else ((df[low_col] <= df["v_true"]) & (df["v_true"] <= df[high_col])).astype(float).to_numpy()
+            )
+            sub["ess_norm"] = (
+                df["ess_is_over_k"].to_numpy()
+                if "ess_is_over_k" in df.columns
+                else (df["ess_is"] / df["K"].clip(lower=1)).to_numpy()
+            )
+            sub = sub.rename(
+                columns={
+                    estimate_col: "estimate",
+                    error_col: "error",
+                    abs_error_col: "abs_error",
+                    sq_error_col: "squared_error",
+                    low_col: "ci_low",
+                    high_col: "ci_high",
+                }
+            )
+            sub["estimator_key"] = key
+            sub["estimator"] = label
+            sub["ci_method"] = method
+            frames.append(sub)
+
+    if not frames:
+        return pd.DataFrame()
+
+    out = pd.concat(frames, ignore_index=True)
+    sort_cols = [c for c in ["estimator", "ci_method", "env_name", "alpha", "beta", "K"] if c in out.columns]
+    return out.sort_values(sort_cols).reset_index(drop=True)
+
+
+def build_ci_coverage_summary(
+    ci_interval_df: pd.DataFrame,
+    ci_level: float = 0.95,
+    group_cols: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    if ci_interval_df.empty:
+        return pd.DataFrame()
+
+    gcols = list(group_cols) if group_cols is not None else [col for col in ["env_name", "estimator", "ci_method"] if col in ci_interval_df.columns]
+    agg = (
+        ci_interval_df.groupby(gcols, dropna=False)
+        .agg(
+            n=("estimate", "size"),
+            coverage_rate=("covered", "mean"),
+            mean_width=("ci_width", "mean"),
+            median_width=("ci_width", "median"),
+            mean_error=("error", "mean"),
+            mean_abs_error=("abs_error", "mean"),
+            mean_half_width=("ci_width", lambda s: float(np.mean(np.asarray(s, dtype=float) / 2.0))),
+        )
+        .reset_index()
+    )
+    agg["coverage_gap"] = agg["coverage_rate"] - float(ci_level)
+    agg["bias_to_half_width_ratio"] = np.where(
+        agg["mean_half_width"] > 1e-12,
+        np.abs(agg["mean_error"]) / agg["mean_half_width"],
+        np.nan,
+    )
+    return agg.sort_values(gcols).reset_index(drop=True)
+
+
+def build_diagnostic_comparability_summary(
+    df: pd.DataFrame,
+    ci_coverage_summary: pd.DataFrame | None = None,
+    estimator_keys: Sequence[str] | None = None,
+    ess_bins: int = 5,
+) -> pd.DataFrame:
+    keys = list(estimator_keys) if estimator_keys is not None else _focused_estimator_keys(df)
+    work = df.copy()
+    work["ess_norm"] = work["ess_is_over_k"] if "ess_is_over_k" in work.columns else (work["ess_is"] / work["K"].clip(lower=1))
+    frames: List[pd.DataFrame] = []
+
+    valid = work[np.isfinite(work["ess_norm"])].copy()
+    if not valid.empty:
+        n_bins = int(min(max(2, ess_bins), max(2, valid["ess_norm"].nunique())))
+        valid["_ess_bin"] = pd.qcut(valid["ess_norm"], q=n_bins, duplicates="drop")
+        for key in keys:
+            abs_error_col = f"abs_error_{key}"
+            sq_error_col = f"squared_error_{key}"
+            if abs_error_col not in valid.columns or sq_error_col not in valid.columns:
+                continue
+            label = ESTIMATOR_KEY_TO_LABEL.get(key, key)
+            agg = (
+                valid.groupby("_ess_bin", dropna=False)
+                .agg(
+                    n=(abs_error_col, "size"),
+                    mean_ess_norm=("ess_norm", "mean"),
+                    mean_abs_error=(abs_error_col, "mean"),
+                    mean_squared_error=(sq_error_col, "mean"),
+                )
+                .reset_index()
+            )
+            agg["diagnostic"] = "ess"
+            agg["estimator"] = label
+            agg["ci_method"] = np.nan
+            agg["ess_bin_low"] = agg["_ess_bin"].map(lambda interval: float(interval.left) if isinstance(interval, pd.Interval) else np.nan)
+            agg["ess_bin_high"] = agg["_ess_bin"].map(lambda interval: float(interval.right) if isinstance(interval, pd.Interval) else np.nan)
+            agg = agg.drop(columns=["_ess_bin"])
+            frames.append(agg)
+
+    if frames:
+        ess_out = pd.concat(frames, ignore_index=True)
+        ess_out["cross_estimator_abs_error_spread"] = ess_out.groupby(["diagnostic", "ess_bin_low", "ess_bin_high"])["mean_abs_error"].transform(
+            lambda s: float(np.max(s) - np.min(s)) if len(s) > 0 else np.nan
+        )
+        ess_out["cross_estimator_mse_spread"] = ess_out.groupby(["diagnostic", "ess_bin_low", "ess_bin_high"])["mean_squared_error"].transform(
+            lambda s: float(np.max(s) - np.min(s)) if len(s) > 0 else np.nan
+        )
+    else:
+        ess_out = pd.DataFrame()
+
+    ci_out = pd.DataFrame()
+    if ci_coverage_summary is not None and not ci_coverage_summary.empty:
+        ci_out = ci_coverage_summary.copy()
+        ci_out["diagnostic"] = "ci"
+        ci_out["mean_ess_norm"] = np.nan
+        ci_out["mean_squared_error"] = np.nan
+        ci_out["ess_bin_low"] = np.nan
+        ci_out["ess_bin_high"] = np.nan
+        spread_cols = [col for col in ["diagnostic", "env_name", "ci_method"] if col in ci_out.columns]
+        ci_out["cross_estimator_abs_error_spread"] = ci_out.groupby(spread_cols)["mean_abs_error"].transform(
+            lambda s: float(np.max(s) - np.min(s)) if len(s) > 0 else np.nan
+        )
+        ci_out["cross_estimator_mse_spread"] = ci_out.groupby(spread_cols)["coverage_gap"].transform(
+            lambda s: float(np.max(np.abs(s)) - np.min(np.abs(s))) if len(s) > 0 else np.nan
+        )
+
+    if ess_out.empty and ci_out.empty:
+        return pd.DataFrame()
+    if ess_out.empty:
+        return ci_out.reset_index(drop=True)
+    if ci_out.empty:
+        return ess_out.reset_index(drop=True)
+    return pd.concat([ess_out, ci_out], ignore_index=True, sort=False).reset_index(drop=True)
 
 
 def _ci_confidence(ci_low: float, ci_high: float) -> str:
