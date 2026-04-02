@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import hashlib
 from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -19,6 +21,14 @@ from ess_ope.v2.estimators import evaluate_estimator
 from ess_ope.v2.inference import BootstrapSummary, episode_bootstrap, summarize_intervals
 from ess_ope.v2.plotting import generate_v2_figures
 from ess_ope.v2.policies import build_policy_pair
+
+
+def _resolve_num_workers(config: PhaseConfig) -> int:
+    requested = int(config.num_workers)
+    if requested > 0:
+        return requested
+    detected = os.cpu_count() or 1
+    return max(1, detected)
 
 
 def _iter_conditions(config: PhaseConfig):
@@ -44,7 +54,8 @@ def _iter_conditions(config: PhaseConfig):
 
 def _seed_hash(*values: Any) -> int:
     text = "|".join(map(str, values)).encode("utf-8")
-    return int.from_bytes(text[:8].ljust(8, b"0"), "little") % (2**32 - 1)
+    digest = hashlib.blake2b(text, digest_size=8).digest()
+    return int.from_bytes(digest, "little") % (2**32 - 1)
 
 
 def _point_row(
@@ -242,7 +253,7 @@ def run_phase(config: PhaseConfig) -> Tuple[pd.DataFrame, Path, Dict[str, pd.Dat
         * len(config.reward_regimes)
         * len(config.rarity_levels)
     )
-    num_workers = int(config.num_workers)
+    num_workers = _resolve_num_workers(config)
     pbar = tqdm(total=total, desc=f"V2:{config.name}", dynamic_ncols=True)
 
     tasks = [{"config": config.to_dict(), "condition": condition} for condition in _iter_conditions(config)]

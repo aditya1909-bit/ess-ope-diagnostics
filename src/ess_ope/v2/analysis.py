@@ -69,7 +69,7 @@ def auc_metrics(score: np.ndarray, label: np.ndarray) -> tuple[float, float]:
 def build_estimator_summary(raw_df: pd.DataFrame) -> pd.DataFrame:
     if raw_df.empty:
         return pd.DataFrame()
-    point_df = raw_df[raw_df["ci_method"] == "point"].copy()
+    point_df = prepare_point_table(raw_df)
     if point_df.empty:
         return pd.DataFrame()
 
@@ -361,7 +361,7 @@ def generate_phase_artifacts(raw_df: pd.DataFrame, output_dir: str | Path) -> Di
     artifacts = {
         "replicate_results": raw_df,
         "point_estimates": point_df,
-        "table_a_estimator_summary": build_estimator_summary(point_df),
+        "table_a_estimator_summary": build_estimator_summary(raw_df),
         "table_b_diagnostic_quality": build_diagnostic_quality_summary(point_df, condition_variance),
         "calibration_summary": build_calibration_summary(point_df),
         "failure_prediction_summary": build_failure_prediction_summary(point_df),

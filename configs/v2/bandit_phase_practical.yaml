@@ -1,9 +1,9 @@
-name: v2_bandit_phase
+name: v2_bandit_phase_practical
 env_family: contextual_bandit
 results_root: results
 gamma: 1.0
 seeds: [0]
-replicates: 500
+replicates: 250
 sample_sizes: [100, 500, 2000]
 mismatch_levels: [low, medium, high]
 reward_noise_levels: [low, medium, high]
@@ -12,12 +12,13 @@ horizons: [1]
 reward_regimes: [normal]
 rarity_levels: [none]
 estimators: [is, wis, dr]
-ci_methods: [analytic, bootstrap_percentile, bootstrap_basic]
+ci_methods: [analytic, bootstrap_percentile]
 ci_levels: [0.9, 0.95]
-bootstrap_samples: 100
+bootstrap_samples: 40
+bootstrap_subsample_ratio: 1.0
 include_reference_estimators: false
 num_workers: -1
-mp_chunksize: 1
+mp_chunksize: 2
 output_subdir: artifacts
 env:
   num_contexts: 8

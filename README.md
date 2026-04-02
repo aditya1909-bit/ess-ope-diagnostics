@@ -40,6 +40,8 @@ Run the full suite:
 PYTHONPATH=src .venv/bin/python experiments/run_v2_suite.py --config configs/v2/paper_suite.yaml
 ```
 
+In the main phase configs, `num_workers: -1` means "use all detected CPU cores".
+
 Re-analyze an existing replicate table:
 ```bash
 PYTHONPATH=src .venv/bin/python experiments/analyze_v2_results.py \
@@ -53,6 +55,10 @@ Primary configs:
 - `configs/v2/tabular_phase.yaml`
 - `configs/v2/rare_event_phase.yaml`
 - `configs/v2/paper_suite.yaml`
+
+Lighter and faster alternatives:
+- `configs/v2/paper_suite_practical.yaml`
+- `configs/v2/paper_suite_fast.yaml`
 
 Smoke-test configs:
 - `configs/v2/tiny_bandit_phase.yaml`
@@ -76,6 +82,11 @@ The artifact directory contains:
 - `v2_fig*.png`
 
 `results/latest` is refreshed to the newest run.
+
+Recommended run variants:
+- `paper_suite.yaml`: heavy full study
+- `paper_suite_practical.yaml`: lighter paper-like run
+- `paper_suite_fast.yaml`: materially faster iteration run
 
 ## Setup
 ```bash

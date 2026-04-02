@@ -1,23 +1,24 @@
-name: v2_rare_event_phase
+name: v2_rare_event_phase_fast
 env_family: rare_event_mdp
 results_root: results
 gamma: 1.0
 seeds: [0]
-replicates: 1000
-sample_sizes: [100, 500, 2000]
+replicates: 150
+sample_sizes: [100, 500]
 mismatch_levels: [low, medium]
-reward_noise_levels: [low, medium]
+reward_noise_levels: [low]
 support_regimes: [weak, near_violated]
 horizons: [10]
 reward_regimes: [sparse]
-rarity_levels: [low, medium, high]
+rarity_levels: [medium, high]
 estimators: [is, wis, pdis, wdr, fqe_linear]
-ci_methods: [analytic, bootstrap_percentile, bootstrap_basic]
-ci_levels: [0.9, 0.95]
-bootstrap_samples: 100
+ci_methods: [analytic, bootstrap_percentile]
+ci_levels: [0.95]
+bootstrap_samples: 20
+bootstrap_subsample_ratio: 0.5
 include_reference_estimators: false
 num_workers: -1
-mp_chunksize: 1
+mp_chunksize: 4
 output_subdir: artifacts
 env:
   num_states: 20

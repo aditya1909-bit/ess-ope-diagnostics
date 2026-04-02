@@ -7,6 +7,7 @@ from ess_ope.evaluation.ground_truth import dynamic_programming_value
 from ess_ope.policies.tabular import TabularPolicy
 from ess_ope.v2.envs import StochasticTabularEnv, build_linear_features
 from ess_ope.v2.estimators import evaluate_estimator
+from ess_ope.v2.policies import build_policy_pair
 
 
 def _tiny_env() -> StochasticTabularEnv:
@@ -54,3 +55,16 @@ def test_v2_estimators_expose_contract_and_contributions() -> None:
             assert result.native_diagnostic_value is not None
         else:
             assert result.native_diagnostic_kind is None
+
+
+def test_v2_support_regimes_change_behavior_policy() -> None:
+    env = _tiny_env()
+    target = TabularPolicy(np.array([[0.8, 0.2], [0.3, 0.7]], dtype=float))
+    truth = dynamic_programming_value(env, target)
+
+    full = build_policy_pair(truth=truth, mismatch_level="medium", support_regime="full", seed=11)
+    weak = build_policy_pair(truth=truth, mismatch_level="medium", support_regime="weak", seed=11)
+    near = build_policy_pair(truth=truth, mismatch_level="medium", support_regime="near_violated", seed=11)
+
+    assert not np.allclose(full.behavior_policy.probs, weak.behavior_policy.probs)
+    assert not np.allclose(weak.behavior_policy.probs, near.behavior_policy.probs)

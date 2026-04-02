@@ -1,23 +1,24 @@
-name: v2_tabular_phase
+name: v2_tabular_phase_practical
 env_family: tabular_mdp
 results_root: results
 gamma: 1.0
 seeds: [0]
-replicates: 500
-sample_sizes: [100, 500, 2000]
+replicates: 150
+sample_sizes: [100, 500]
 mismatch_levels: [low, medium, high]
 reward_noise_levels: [low, high]
-support_regimes: [full, weak, near_violated]
+support_regimes: [full, weak]
 horizons: [5, 10]
 reward_regimes: [normal]
 rarity_levels: [none]
 estimators: [pdis, dr, wdr, fqe_linear]
-ci_methods: [analytic, bootstrap_percentile, bootstrap_basic]
+ci_methods: [analytic, bootstrap_percentile]
 ci_levels: [0.9, 0.95]
-bootstrap_samples: 100
+bootstrap_samples: 30
+bootstrap_subsample_ratio: 0.75
 include_reference_estimators: false
 num_workers: -1
-mp_chunksize: 1
+mp_chunksize: 2
 output_subdir: artifacts
 env:
   num_states: 20

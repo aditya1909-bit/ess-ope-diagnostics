@@ -22,6 +22,12 @@ SUPPORT_FLOOR = {
     "near_violated": 0.005,
 }
 
+TARGET_ACTION_STRESS = {
+    "full": 1.0,
+    "weak": 0.35,
+    "near_violated": 0.08,
+}
+
 
 @dataclass
 class PolicyBundle:
@@ -50,6 +56,21 @@ def _anti_policy_probs(target: np.ndarray) -> np.ndarray:
     return rev
 
 
+def _apply_support_stress(behavior: np.ndarray, target: np.ndarray, support_regime: str) -> np.ndarray:
+    stressed = np.asarray(behavior, dtype=float).copy()
+    stress = float(TARGET_ACTION_STRESS.get(str(support_regime), 0.35))
+    greedy = np.argmax(target, axis=-1)
+
+    if stressed.ndim == 2:
+        stressed[np.arange(stressed.shape[0]), greedy] *= stress
+    else:
+        t_idx, s_idx = np.indices(greedy.shape)
+        stressed[t_idx, s_idx, greedy] *= stress
+
+    stressed /= np.sum(stressed, axis=-1, keepdims=True)
+    return stressed
+
+
 def build_policy_pair(
     truth: GroundTruthResult,
     mismatch_level: str,
@@ -67,6 +88,7 @@ def build_policy_pair(
     support_floor = float(SUPPORT_FLOOR.get(str(support_regime), 0.03))
     behavior = (1.0 - mix) * target_probs + mix * anti
     behavior += 0.03 * rng.random(size=behavior.shape)
+    behavior = _apply_support_stress(behavior, target_probs, support_regime=support_regime)
     behavior = _apply_support_floor(behavior, support_floor)
 
     return PolicyBundle(
