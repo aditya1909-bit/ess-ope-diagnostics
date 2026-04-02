@@ -1,0 +1,7 @@
+name: v2_paper_suite
+results_root: results
+output_subdir: paper_artifacts
+phase_configs:
+  - configs/v2/bandit_phase.yaml
+  - configs/v2/tabular_phase.yaml
+  - configs/v2/rare_event_phase.yaml

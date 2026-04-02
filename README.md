@@ -1,121 +1,81 @@
 # ess-ope-diagnostics
 
-Goal: show that ESS is useful for low-bias importance-weighted estimators (`IS`, oracle `DR`) but is not a universal reliability diagnostic across biased estimators (`DM`, `FQE`). The benchmark now centers on ESS, bias/variance, and CI calibration in finite-horizon discrete MDPs.
+This repo now contains only the v2 OPE uncertainty-diagnostics framework.
 
-## What This Repo Does
-This project builds controlled `RandomMDP` and `chain_bandit` sweeps with exact dynamic-programming ground truth. The focused study compares four estimators:
-- `IS-PDIS`
-- oracle `DR`
-- `DM` (`dm_tabular`)
-- `FQE` (`fqe_linear`)
+## What It Does
+The v2 pipeline studies whether ESS and confidence-interval diagnostics track true uncertainty in offline policy evaluation across:
+- contextual bandits
+- short-horizon tabular MDPs
+- rare-event / sparse-reward MDPs
 
-It tests three questions:
-- whether ESS predicts total error for the unbiased side (`IS`, `DR`)
-- whether that breaks for the biased side (`DM`, `FQE`)
-- whether estimator-level confidence intervals are calibrated and cross-comparable
+Main estimators:
+- `is`
+- `wis`
+- `pdis`
+- `dr`
+- `wdr`
+- `fqe_linear`
 
-## Repo Flow (Recommended)
-1. Run benchmark sweep + plot generation:
+Optional reference estimators can be enabled in config:
+- `dr_oracle`
+- `fqe_tabular`
+
+Core outputs:
+- raw replicate-level results
+- Table A estimator summaries
+- Table B diagnostic-quality summaries
+- calibration summaries
+- failure-prediction summaries
+- cross-estimator ranking tables
+- paper figures under `v2_fig*.png`
+
+## Main Workflow
+Run one small phase:
 ```bash
-PYTHONPATH=src OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
-.venv/bin/python experiments/run_benchmark.py --config configs/sweeps/random_mdp_ci_ultra.yaml --interval-mode both --ci-level 0.95 --ci-bootstrap-samples 100 --estimators is_pdis,dr_oracle,dm_tabular,fqe_linear --num-workers -1 --mp-chunksize 1
-```
-2. Re-analyze any existing results:
-```bash
-PYTHONPATH=src .venv/bin/python experiments/analyze_results.py --results results/latest_random_mdp/sweep_results.csv --output-dir results/latest_random_mdp/figures --interval-mode both --ci-level 0.95 --estimators is_pdis,dr_oracle,dm_tabular,fqe_linear
-```
-
-## Notebook Workflow
-- `notebooks/02_interpret_results.ipynb`: load `results/latest_random_mdp` or `results/latest_chain_bandit`, regenerate figures, inspect the current run scorecard, compare against the previous same-env run, then review claims/tables/figures
-
-## Key Output Files
-After a run, see `results/<timestamp>_<name>/`:
-- `sweep_results.parquet` / `sweep_results.csv`
-- `figures/benchmark_fig1_ess_vs_error_by_estimator.*`
-- `figures/benchmark_fig2_same_ess_different_error.*`
-- `figures/benchmark_fig3_ess_changes_error_stability.*`
-- `figures/benchmark_fig4_fan_estimate_vs_ess.*`
-- `figures/benchmark_fig5_mean_variance_sensitivity.*` (for chain-bandit sweeps)
-- `figures/benchmark_fig6_ess_bias_variance_mse.*`
-- `figures/benchmark_fig7_matched_ess_risk_curves.*`
-- `figures/benchmark_fig8_ci_coverage_width.*`
-- `figures/benchmark_fig9_ci_method_comparison.*`
-- `figures/benchmark_fig10_ess_story_dashboard.*`
-- `figures/benchmark_fig11_ci_story_dashboard.*`
-- `figures/benchmark_report.csv`
-- `figures/estimator_summary.csv` (global estimator stats + bootstrap CI for ESS-error correlations)
-- `figures/condition_summary.csv` (per `(alpha,beta,K)` error means + CI)
-- `figures/bias_variance_summary.csv`
-- `figures/ci_interval_summary.csv`
-- `figures/ci_coverage_summary.csv`
-- `figures/diagnostic_comparability.csv`
-- `figures/chain_bandit_sensitivity_summary.csv` (how reward mean scale, reward gap, reward variance, and transition strength move error and ESS)
-- `figures/paper_claims.csv` (claim-by-claim CI-aware verdicts)
-- `figures/paper_claim_summary.csv` (supported / inconclusive / not_supported breakdown)
-- `figures/trial_scorecard.csv` (one-row-per-estimator triage table with error, ESS correlation, bootstrap CI calibration, and aggregate claim verdict)
-
-`results/latest_runs.json` is tracked in git and records the latest overall run plus the latest run for each benchmark family. The directories `results/latest_random_mdp/` and `results/latest_chain_bandit/` are tracked snapshots containing the newest CSV data and figures for each benchmark family. `results/latest` remains a local convenience symlink to the newest raw timestamped run.
-`results/trial_index.csv` is a cross-run index for quick same-env comparisons across past trials.
-
-## Sweep Intensity Controls
-Use these knobs in sweep YAML for stronger evidence:
-- `env_repeats`: independent environment draws per `(seed, beta)`
-- `policy_repeats`: independent policy-pair draws per environment
-- `dataset_repeats`: independent offline datasets per condition
-- `num_workers`: process-level parallelism for condition evaluation (macOS-safe `spawn` mode)
-- `mp_chunksize`: number of condition tasks dispatched per worker chunk
-
-Total rows:
-`len(seeds) * len(betas) * len(alphas) * len(dataset_sizes) * env_repeats * policy_repeats * dataset_repeats`
-
-Profiles:
-- `configs/sweeps/random_mdp_ci_focused.yaml`: smaller ESS/CI sweep for fast iteration
-- `configs/sweeps/random_mdp_ci_ultra.yaml`: primary heavy `RandomMDP` study
-- `configs/sweeps/chain_bandit_ci_focused.yaml`: smaller confirmation study on `chain_bandit`
-
-## Apple Silicon (Mac) Efficiency
-- Parallelism is enabled via sweep config (`num_workers`, `mp_chunksize`) using multiprocessing `spawn`, which is the stable mode on macOS.
-- Start with `num_workers: 8` on M-series laptops; increase gradually if memory allows.
-- To avoid BLAS thread oversubscription with multiprocessing, run with:
-```bash
-OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
-python experiments/run_benchmark.py --config configs/sweeps/random_mdp_ci_ultra.yaml
+PYTHONPATH=src .venv/bin/python experiments/run_v2_phase.py --config configs/v2/tiny_bandit_phase.yaml
 ```
 
-Paper claims mode is enabled by default in `run_benchmark.py` and `analyze_results.py`.
-Disable with `--no-paper-mode` if you only want figures + base summaries.
-
-## Estimators
-- `IS-PDIS`
-- oracle `DR`
-- `DM` (`dm_tabular`)
-- `FQE` (`fqe_linear`)
-
-## Environments
-- `RandomMDP`: sparse transitions + misspecification knob (`beta`)
-- `Gridworld`: interpretable baseline
-- `ChainBanditEnv`: layered chain of bandit-like decisions; supports `reward_only` and `transitional` variants plus separate reward mean and reward variance sweeps
-
-## Chain Bandit Benchmark
-Use the chain benchmark when you want a simpler sequential testbed than a fully random MDP:
+Run the full suite:
 ```bash
-PYTHONPATH=src OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
-.venv/bin/python experiments/run_benchmark.py --config configs/sweeps/chain_bandit_ci_focused.yaml --interval-mode both --ci-level 0.95 --ci-bootstrap-samples 60 --estimators is_pdis,dr_oracle,dm_tabular,fqe_linear --num-workers -1 --mp-chunksize 1
+PYTHONPATH=src .venv/bin/python experiments/run_v2_suite.py --config configs/v2/paper_suite.yaml
 ```
 
-Main chain-bandit sweep knobs:
-- `transition_strengths`: how strongly actions affect the next state
-- `reward_mean_scales`: overall signal level in reward means
-- `reward_gaps`: separation between the preferred arm and the others
-- `reward_stds`: reward noise level, independent of the reward means
-- `chain_variants`: `reward_only` keeps transitions action-independent; `transitional` makes the problem genuinely sequential
+Re-analyze an existing replicate table:
+```bash
+PYTHONPATH=src .venv/bin/python experiments/analyze_v2_results.py \
+  --results results/latest/replicate_results.csv \
+  --output-dir results/latest/paper_artifacts
+```
 
-## Reproducibility
-Each sweep run stores:
-- config YAML
-- git commit hash (or `unknown` when unavailable)
-- seeds and per-condition `env_seed` / `policy_seed` / `dataset_seed`
-- raw table + generated figures
+## Configs
+Primary configs:
+- `configs/v2/bandit_phase.yaml`
+- `configs/v2/tabular_phase.yaml`
+- `configs/v2/rare_event_phase.yaml`
+- `configs/v2/paper_suite.yaml`
+
+Smoke-test configs:
+- `configs/v2/tiny_bandit_phase.yaml`
+- `configs/v2/tiny_tabular_phase.yaml`
+- `configs/v2/tiny_rare_event_phase.yaml`
+- `configs/v2/paper_suite_tiny.yaml`
+
+## Outputs
+Each run writes a timestamped directory under `results/` with:
+- `replicate_results.csv` / `replicate_results.parquet`
+- `artifacts/` or `paper_artifacts/`
+
+The artifact directory contains:
+- `table_a_estimator_summary.csv`
+- `table_b_diagnostic_quality.csv`
+- `calibration_summary.csv`
+- `failure_prediction_summary.csv`
+- `cross_estimator_ranking.csv`
+- `condition_variance_summary.csv`
+- `diagnostic_correlation_summary.csv`
+- `v2_fig*.png`
+
+`results/latest` is refreshed to the newest run.
 
 ## Setup
 ```bash
@@ -124,5 +84,3 @@ source .venv/bin/activate
 pip install -e .[dev]
 pytest -q
 ```
-
-## Citation / License

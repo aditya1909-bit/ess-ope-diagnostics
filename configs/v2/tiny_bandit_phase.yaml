@@ -1,0 +1,27 @@
+name: v2_tiny_bandit_phase
+env_family: contextual_bandit
+results_root: results
+gamma: 1.0
+seeds: [0]
+replicates: 4
+sample_sizes: [20]
+mismatch_levels: [low, high]
+reward_noise_levels: [low]
+support_regimes: [full]
+horizons: [1]
+reward_regimes: [normal]
+rarity_levels: [none]
+estimators: [is, wis, dr]
+ci_methods: [analytic, bootstrap_percentile]
+ci_levels: [0.9, 0.95]
+bootstrap_samples: 4
+include_reference_estimators: true
+num_workers: 1
+mp_chunksize: 1
+output_subdir: artifacts
+env:
+  num_contexts: 4
+  num_actions: 2
+  linear_feature_dim: 6
+  action_gap: 0.5
+  fqe_l2_reg: 0.0001

@@ -1,0 +1,27 @@
+name: v2_tiny_rare_event_phase
+env_family: rare_event_mdp
+results_root: results
+gamma: 1.0
+seeds: [0]
+replicates: 3
+sample_sizes: [16]
+mismatch_levels: [medium]
+reward_noise_levels: [low]
+support_regimes: [near_violated]
+horizons: [4]
+reward_regimes: [sparse]
+rarity_levels: [medium]
+estimators: [is, wis, pdis, wdr, fqe_linear]
+ci_methods: [analytic, bootstrap_percentile]
+ci_levels: [0.9]
+bootstrap_samples: 3
+include_reference_estimators: false
+num_workers: 1
+mp_chunksize: 1
+output_subdir: artifacts
+env:
+  num_states: 8
+  num_actions: 2
+  linear_feature_dim: 6
+  rare_reward: 8.0
+  fqe_l2_reg: 0.0001

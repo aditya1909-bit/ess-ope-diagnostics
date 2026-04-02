@@ -1,0 +1,28 @@
+name: v2_tiny_tabular_phase
+env_family: tabular_mdp
+results_root: results
+gamma: 1.0
+seeds: [0]
+replicates: 3
+sample_sizes: [16]
+mismatch_levels: [medium]
+reward_noise_levels: [low]
+support_regimes: [weak]
+horizons: [4]
+reward_regimes: [normal]
+rarity_levels: [none]
+estimators: [pdis, dr, wdr, fqe_linear]
+ci_methods: [analytic, bootstrap_percentile]
+ci_levels: [0.9]
+bootstrap_samples: 3
+include_reference_estimators: true
+num_workers: 1
+mp_chunksize: 1
+output_subdir: artifacts
+env:
+  num_states: 8
+  num_actions: 2
+  branch_factor: 2
+  linear_feature_dim: 6
+  late_reward_multiplier: 1.2
+  fqe_l2_reg: 0.0001

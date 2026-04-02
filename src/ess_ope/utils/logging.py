@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,12 +14,8 @@ if TYPE_CHECKING:
 
 
 _RUN_DIR_RE = re.compile(r"^\d{8}_\d{6}_.+")
-_LATEST_ALIAS_RE = re.compile(r"^latest(?:_[A-Za-z0-9_]+)?$")
+_LATEST_ALIAS_RE = re.compile(r"^latest$")
 _LATEST_MANIFEST = "latest_runs.json"
-_TRACKED_SNAPSHOT_ALIASES = {
-    "random_mdp": "latest_random_mdp",
-    "chain_bandit": "latest_chain_bandit",
-}
 
 
 def git_commit_hash() -> str:
@@ -119,25 +114,6 @@ def save_latest_manifest(results_root: str | Path, manifest: Dict[str, str]) -> 
     return manifest_path
 
 
-def latest_run_dir_for_env(results_root: str | Path, env_name: str) -> Optional[Path]:
-    root = Path(results_root)
-    if not root.exists():
-        return None
-
-    token = f"_{env_name}_"
-    suffix = f"_{env_name}"
-    candidates = [
-        path
-        for path in root.iterdir()
-        if path.is_dir()
-        and _RUN_DIR_RE.match(path.name)
-        and (token in path.name or path.name.endswith(suffix))
-    ]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda path: path.name)
-
-
 def resolve_latest_path(path: str | Path) -> Path:
     p = Path(path)
     parts = list(p.parts)
@@ -164,11 +140,7 @@ def resolve_latest_path(path: str | Path) -> Path:
     if latest_dir is not None and not latest_dir.exists():
         latest_dir = None
     if latest_dir is None:
-        if alias == "latest":
-            latest_dir = latest_run_dir(results_root)
-        else:
-            env_name = alias.replace("latest_", "", 1)
-            latest_dir = latest_run_dir_for_env(results_root, env_name)
+        latest_dir = latest_run_dir(results_root)
     if latest_dir is None:
         return p
     return latest_dir / suffix
@@ -181,11 +153,6 @@ def refresh_latest_pointer(results_root: str | Path) -> Optional[Path]:
         return None
     manifest: Dict[str, str] = {"latest": latest_dir.name}
     update_latest_pointer(root, latest_dir)
-    for env_name in ["random_mdp", "chain_bandit"]:
-        env_latest = latest_run_dir_for_env(root, env_name)
-        if env_latest is not None:
-            alias = f"latest_{env_name}"
-            manifest[alias] = env_latest.name
     save_latest_manifest(root, manifest)
     return root / "latest"
 
@@ -200,31 +167,3 @@ def update_latest_pointer(results_root: str | Path, run_dir: Path, alias: str = 
         return latest
     except Exception:
         return None
-
-
-def sync_tracked_latest_snapshot(results_root: str | Path, run_dir: str | Path, env_name: str) -> Optional[Path]:
-    alias = _TRACKED_SNAPSHOT_ALIASES.get(env_name)
-    if alias is None:
-        return None
-
-    root = Path(results_root)
-    source = Path(run_dir)
-    snapshot_dir = root / alias
-
-    if snapshot_dir.is_symlink() or snapshot_dir.is_file():
-        snapshot_dir.unlink()
-    elif snapshot_dir.exists():
-        shutil.rmtree(snapshot_dir)
-
-    snapshot_dir.mkdir(parents=True, exist_ok=True)
-
-    for name in ["config.yaml", "metadata.json", "sweep_results.csv"]:
-        src = source / name
-        if src.exists():
-            shutil.copy2(src, snapshot_dir / name)
-
-    figures_src = source / "figures"
-    if figures_src.exists() and figures_src.is_dir():
-        shutil.copytree(figures_src, snapshot_dir / "figures")
-
-    return snapshot_dir
