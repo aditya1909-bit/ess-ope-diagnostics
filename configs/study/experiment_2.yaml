@@ -1,0 +1,19 @@
+experiment_id: experiment_2
+title: Same mismatch, different reward mean structure
+environment:
+  name: contextual_bandit
+  mismatch_level: medium
+  reward_variance_regime: medium
+grid:
+  sample_size: [100, 300, 1000, 3000]
+  reward_mean_structure: [smooth, heterogeneous]
+estimators: [is, snis]
+intervals:
+  methods: [bootstrap_percentile, bootstrap_normal]
+  levels: [0.9, 0.95]
+  primary_level: 0.9
+  bootstrap_samples: 500
+  subsample_ratio: 1.0
+  enable_concentration: false
+replicates: 500
+seeds: [0]

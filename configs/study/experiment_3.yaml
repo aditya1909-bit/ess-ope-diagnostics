@@ -1,0 +1,18 @@
+experiment_id: experiment_3
+title: Cross-family comparison in a short-horizon MDP
+environment:
+  name: short_tabular_mdp
+  reward_variant: dense
+  mismatch_level: medium
+grid:
+  sample_size: [50, 100, 300, 1000]
+estimators: [is, snis, pdis, dm, dr, mrdr, fqe]
+intervals:
+  methods: [bootstrap_percentile, bootstrap_normal]
+  levels: [0.9, 0.95]
+  primary_level: 0.9
+  bootstrap_samples: 500
+  subsample_ratio: 1.0
+  enable_concentration: false
+replicates: 500
+seeds: [0]

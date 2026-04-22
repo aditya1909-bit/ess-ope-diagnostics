@@ -1,0 +1,19 @@
+experiment_id: experiment_1
+title: Same weights, different reward variance
+environment:
+  name: contextual_bandit
+  reward_mean_structure: smooth
+grid:
+  sample_size: [100, 300, 1000, 3000]
+  mismatch_level: [low, medium, high]
+  reward_variance_regime: [low, medium, high]
+estimators: [is, snis]
+intervals:
+  methods: [bootstrap_percentile, bootstrap_normal]
+  levels: [0.9, 0.95]
+  primary_level: 0.9
+  bootstrap_samples: 500
+  subsample_ratio: 1.0
+  enable_concentration: false
+replicates: 500
+seeds: [0]

@@ -1,0 +1,15 @@
+name: paper_full
+results_root: results
+output_subdir: artifacts
+experiment_configs:
+  - configs/study/experiment_1.yaml
+  - configs/study/experiment_2.yaml
+  - configs/study/experiment_3.yaml
+  - configs/study/experiment_4.yaml
+  - configs/study/experiment_5.yaml
+overrides:
+  num_workers: -1
+  replicates: 500
+  intervals:
+    bootstrap_samples: 500
+    primary_level: 0.9

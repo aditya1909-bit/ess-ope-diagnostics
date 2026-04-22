@@ -1,0 +1,17 @@
+name: paper_tiny
+results_root: results
+output_subdir: artifacts
+experiment_configs:
+  - configs/study/experiment_1.yaml
+  - configs/study/experiment_2.yaml
+  - configs/study/experiment_3.yaml
+  - configs/study/experiment_4.yaml
+  - configs/study/experiment_5.yaml
+overrides:
+  num_workers: -1
+  replicates: 3
+  intervals:
+    bootstrap_samples: 6
+    primary_level: 0.9
+  grid:
+    sample_size: [20, 40]

@@ -1,0 +1,18 @@
+experiment_id: experiment_4
+title: Horizon and support mismatch stress test
+environment:
+  name: long_tabular_mdp
+  reward_variant: sparse_late
+grid:
+  sample_size: [300]
+  mismatch_level: [low, medium, high]
+estimators: [is, snis, pdis, dm, dr, mrdr, fqe]
+intervals:
+  methods: [bootstrap_percentile, bootstrap_normal]
+  levels: [0.9, 0.95]
+  primary_level: 0.9
+  bootstrap_samples: 500
+  subsample_ratio: 1.0
+  enable_concentration: false
+replicates: 500
+seeds: [0]

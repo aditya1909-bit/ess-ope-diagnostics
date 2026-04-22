@@ -1,0 +1,17 @@
+experiment_id: experiment_5
+title: FQE bootstrap calibration
+environment:
+  name: fqe_calibration_pair
+grid:
+  calibration_env: [short_positive, long_stress]
+  sample_size: [100, 300, 1000, 3000]
+estimators: [fqe]
+intervals:
+  methods: [bootstrap_percentile, bootstrap_normal]
+  levels: [0.9, 0.95]
+  primary_level: 0.9
+  bootstrap_samples: 500
+  subsample_ratio: 1.0
+  enable_concentration: false
+replicates: 500
+seeds: [0]

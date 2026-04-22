@@ -1,97 +1,84 @@
 # ess-ope-diagnostics
 
-This repo now contains only the v2 OPE uncertainty-diagnostics framework.
+Paper-specific simulation repo for testing when weight-based ESS tracks uncertainty in offline policy evaluation, when it fails, and how interval width and empirical coverage compare across estimator families.
 
-## What It Does
-The v2 pipeline studies whether ESS and confidence-interval diagnostics track true uncertainty in offline policy evaluation across:
-- contextual bandits
-- short-horizon tabular MDPs
-- rare-event / sparse-reward MDPs
+## Study Structure
+The primary repo surface is a fixed 5-experiment study:
 
-Main estimators:
+1. `experiment_1`: bandit same-weights / different-reward-variance sanity check
+2. `experiment_2`: bandit same-mismatch / different-reward-mean structure
+3. `experiment_3`: short-horizon tabular MDP cross-family comparison
+4. `experiment_4`: long-horizon mismatch stress test
+5. `experiment_5`: FQE bootstrap calibration on short and long MDP settings
+
+Environments:
+- contextual bandit: `S=20`, `A=4`
+- short tabular MDP: `S=30`, `A=4`, `H=5`
+- long tabular MDP: `S=50`, `A=4`, `H=20`
+
+Estimator set:
 - `is`
-- `wis`
+- `snis`
 - `pdis`
+- `dm`
 - `dr`
-- `wdr`
-- `fqe_linear`
+- `mrdr`
+- `fqe`
 
-Optional reference estimators can be enabled in config:
-- `dr_oracle`
-- `fqe_tabular`
+Default study conventions:
+- exact dynamic-programming truth for all environments
+- shared dataset seeds across estimators within each condition
+- episode-level bootstrap only
+- 90% as the primary CI level, 95% as secondary
+- Spearman correlations for diagnostic-strength summaries
 
-Core outputs:
-- raw replicate-level results
-- Table A estimator summaries
-- Table B diagnostic-quality summaries
-- calibration summaries
-- failure-prediction summaries
-- cross-estimator ranking tables
-- paper figures under `v2_fig*.png`
-
-## Main Workflow
-Run one small phase:
+## Main Commands
+Run one experiment:
 ```bash
-PYTHONPATH=src .venv/bin/python experiments/run_v2_phase.py --config configs/v2/tiny_bandit_phase.yaml
+PYTHONPATH=src .venv/bin/python experiments/run_experiment.py --config configs/study/experiment_3.yaml
 ```
 
-Run the full suite:
+Run the full paper study:
 ```bash
-PYTHONPATH=src .venv/bin/python experiments/run_v2_suite.py --config configs/v2/paper_suite.yaml
+PYTHONPATH=src .venv/bin/python experiments/run_study.py --config configs/study/paper_practical.yaml
 ```
 
-In the main phase configs, `num_workers: -1` means "use all detected CPU cores".
-
-Re-analyze an existing replicate table:
+Re-analyze saved replicate results:
 ```bash
-PYTHONPATH=src .venv/bin/python experiments/analyze_v2_results.py \
-  --results results/latest/replicate_results.csv \
-  --output-dir results/latest/paper_artifacts
+PYTHONPATH=src .venv/bin/python experiments/analyze_results.py \
+  --results results/latest/artifacts/replicate_results.csv
 ```
 
-## Configs
-Primary configs:
-- `configs/v2/bandit_phase.yaml`
-- `configs/v2/tabular_phase.yaml`
-- `configs/v2/rare_event_phase.yaml`
-- `configs/v2/paper_suite.yaml`
+## Config Tiers
+- `configs/study/paper_full.yaml`: 500 replicates, 500 bootstraps
+- `configs/study/paper_practical.yaml`: 200 replicates, 200 bootstraps
+- `configs/study/paper_tiny.yaml`: smoke-test scale
 
-Lighter and faster alternatives:
-- `configs/v2/paper_suite_practical.yaml`
-- `configs/v2/paper_suite_fast.yaml`
-
-Smoke-test configs:
-- `configs/v2/tiny_bandit_phase.yaml`
-- `configs/v2/tiny_tabular_phase.yaml`
-- `configs/v2/tiny_rare_event_phase.yaml`
-- `configs/v2/paper_suite_tiny.yaml`
+Individual experiments live under `configs/study/experiment_*.yaml`.
 
 ## Outputs
-Each run writes a timestamped directory under `results/` with:
-- `replicate_results.csv` / `replicate_results.parquet`
-- `artifacts/` or `paper_artifacts/`
-
-The artifact directory contains:
-- `table_a_estimator_summary.csv`
-- `table_b_diagnostic_quality.csv`
-- `calibration_summary.csv`
-- `failure_prediction_summary.csv`
-- `cross_estimator_ranking.csv`
-- `condition_variance_summary.csv`
-- `diagnostic_correlation_summary.csv`
-- `v2_fig*.png`
+Each run writes a timestamped directory under `results/` containing:
+- `artifacts/replicate_results.csv`
+- `artifacts/condition_summary.csv`
+- `artifacts/table_1_main_summary.csv`
+- `artifacts/table_2_diagnostic_usefulness.csv`
+- `artifacts/figure_1.png` through `artifacts/figure_8.png`
+- `config.yaml`
+- `metadata.json`
 
 `results/latest` is refreshed to the newest run.
 
-Recommended run variants:
-- `paper_suite.yaml`: heavy full study
-- `paper_suite_practical.yaml`: lighter paper-like run
-- `paper_suite_fast.yaml`: materially faster iteration run
+## Narrative Order
+The analysis and figures follow the paper narrative directly:
+- bandit sanity checks
+- short-horizon cross-family comparison
+- long-horizon stress test
+- FQE interval calibration
 
 ## Setup
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
-pytest -q
+.venv/bin/pytest -q
 ```
