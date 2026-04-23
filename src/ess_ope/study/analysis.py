@@ -12,6 +12,7 @@ from ess_ope.utils.logging import save_results_table
 PRIMARY_INTERVAL_METHOD = "bootstrap_percentile"
 MAIN_EXPERIMENT_ID = "experiment_3"
 MAIN_SAMPLE_SIZE = 300
+MAIN_MISMATCH_ALPHA = 0.4
 
 
 def _safe_spearman(x: pd.Series, y: pd.Series) -> float:
@@ -28,10 +29,8 @@ def _condition_cols(df: pd.DataFrame) -> List[str]:
         "experiment_id",
         "env_name",
         "sample_size",
-        "mismatch_level",
-        "reward_variance_regime",
-        "reward_mean_structure",
-        "reward_variant",
+        "mismatch_alpha",
+        "reward_variance_scale",
         "calibration_env",
         "seed",
     ]
@@ -48,36 +47,33 @@ def prepare_point_table(raw_df: pd.DataFrame, primary_level: float) -> pd.DataFr
     ][["condition_id", "replicate_id", "estimator_key", "ci_width", "covered"]].rename(
         columns={"ci_width": "ci_width_proxy", "covered": "coverage_proxy"}
     )
-    if width_proxy.empty:
-        width_proxy = raw_df[raw_df["ci_method"] != "point"][
-            ["condition_id", "replicate_id", "estimator_key", "ci_width", "covered"]
-        ].rename(columns={"ci_width": "ci_width_proxy", "covered": "coverage_proxy"})
     width_proxy = width_proxy.drop_duplicates(subset=["condition_id", "replicate_id", "estimator_key"])
     point_df = point_df.merge(width_proxy, on=["condition_id", "replicate_id", "estimator_key"], how="left")
-    point_df["coverage_proxy"] = point_df["coverage_proxy"].astype(float)
     return point_df
 
 
-def build_condition_summary(raw_df: pd.DataFrame) -> pd.DataFrame:
-    point_df = raw_df[raw_df["ci_method"] == "point"].copy()
+def build_condition_summary(raw_df: pd.DataFrame, primary_level: float) -> pd.DataFrame:
+    point_df = prepare_point_table(raw_df, primary_level=primary_level)
     if point_df.empty:
         return pd.DataFrame()
+    interval_df = raw_df[
+        (raw_df["ci_method"] != "point")
+        & (np.isclose(raw_df["ci_level"], float(primary_level), equal_nan=False))
+    ].copy()
     rows: List[Dict[str, object]] = []
-    interval_df = raw_df[raw_df["ci_method"] != "point"].copy()
-    group_cols = _condition_cols(point_df) + ["estimator_key"]
+    group_cols = _condition_cols(point_df) + ["estimator_key", "estimator_label", "estimator_family"]
     for key, group in point_df.groupby(group_cols, dropna=False):
         row = dict(zip(group_cols, key if isinstance(key, tuple) else (key,)))
-        row["bias"] = float(group["error"].mean())
-        row["variance"] = float(group["estimate"].var(ddof=0))
-        row["rmse"] = float(np.sqrt(group["squared_error"].mean()))
+        sub_interval = interval_df.copy()
+        for col in group_cols:
+            sub_interval = sub_interval[sub_interval[col] == row[col]]
+        row["mean_abs_error"] = float(group["abs_error"].mean())
+        row["estimator_variance"] = float(group["estimate"].var(ddof=0))
         row["mean_wess"] = float(group["shared_wess"].mean())
-        for ci_level in sorted(interval_df["ci_level"].dropna().unique()):
-            level_mask = np.isclose(interval_df["ci_level"], float(ci_level))
-            sub = interval_df[level_mask].copy()
-            for col in group_cols:
-                sub = sub[sub[col] == row[col]]
-            row[f"mean_ci_width_{ci_level:.2f}"] = float(sub["ci_width"].mean()) if not sub.empty else np.nan
-            row[f"coverage_{ci_level:.2f}"] = float(sub["covered"].mean()) if not sub.empty else np.nan
+        row["mean_ci_width"] = float(sub_interval["ci_width"].mean()) if not sub_interval.empty else np.nan
+        row["empirical_coverage"] = float(sub_interval["covered"].mean()) if not sub_interval.empty else np.nan
+        row["spearman_wess_abs_error"] = _safe_spearman(group["shared_wess"], group["abs_error"])
+        row["spearman_width_abs_error"] = _safe_spearman(group["ci_width_proxy"], group["abs_error"])
         rows.append(row)
     return pd.DataFrame(rows).sort_values(group_cols).reset_index(drop=True)
 
@@ -88,7 +84,9 @@ def _main_experiment_point_df(raw_df: pd.DataFrame, primary_level: float) -> pd.
         return point_df
     sub = point_df[point_df["experiment_id"] == MAIN_EXPERIMENT_ID].copy()
     if "sample_size" in sub.columns and (sub["sample_size"] == MAIN_SAMPLE_SIZE).any():
-        sub = sub[sub["sample_size"] == MAIN_SAMPLE_SIZE].copy()
+        sub = sub[np.isclose(sub["sample_size"], MAIN_SAMPLE_SIZE)]
+    if "mismatch_alpha" in sub.columns and np.isclose(sub["mismatch_alpha"], MAIN_MISMATCH_ALPHA).any():
+        sub = sub[np.isclose(sub["mismatch_alpha"], MAIN_MISMATCH_ALPHA)]
     return sub
 
 
@@ -99,7 +97,9 @@ def _main_interval_df(raw_df: pd.DataFrame, ci_level: float) -> pd.DataFrame:
         & (np.isclose(raw_df["ci_level"], float(ci_level), equal_nan=False))
     ].copy()
     if "sample_size" in interval_df.columns and (interval_df["sample_size"] == MAIN_SAMPLE_SIZE).any():
-        interval_df = interval_df[interval_df["sample_size"] == MAIN_SAMPLE_SIZE].copy()
+        interval_df = interval_df[np.isclose(interval_df["sample_size"], MAIN_SAMPLE_SIZE)]
+    if "mismatch_alpha" in interval_df.columns and np.isclose(interval_df["mismatch_alpha"], MAIN_MISMATCH_ALPHA).any():
+        interval_df = interval_df[np.isclose(interval_df["mismatch_alpha"], MAIN_MISMATCH_ALPHA)]
     return interval_df
 
 
@@ -107,39 +107,68 @@ def build_table_1_main_summary(raw_df: pd.DataFrame, primary_level: float) -> pd
     point_df = _main_experiment_point_df(raw_df, primary_level)
     if point_df.empty:
         return pd.DataFrame()
-    rows = []
     interval_df = _main_interval_df(raw_df, primary_level)
-    interval_95 = _main_interval_df(raw_df, 0.95)
+    rows = []
     for estimator_key, group in point_df.groupby("estimator_key", dropna=False):
         sub_interval = interval_df[interval_df["estimator_key"] == estimator_key]
-        sub_95 = interval_95[interval_95["estimator_key"] == estimator_key]
-        row = {
-            "estimator_key": estimator_key,
-            "bias": float(group["error"].mean()),
-            "variance": float(group["estimate"].var(ddof=0)),
-            "rmse": float(np.sqrt(group["squared_error"].mean())),
-            "mean_wess": float(group["shared_wess"].mean()),
-            "mean_ci_width": float(sub_interval["ci_width"].mean()) if not sub_interval.empty else np.nan,
-            "coverage_0.90": float(sub_interval["covered"].mean()) if not sub_interval.empty else np.nan,
-            "coverage_0.95": float(sub_95["covered"].mean()) if not sub_95.empty else np.nan,
-        }
-        rows.append(row)
+        rows.append(
+            {
+                "estimator_key": estimator_key,
+                "estimator_label": str(group["estimator_label"].iloc[0]),
+                "estimator_family": str(group["estimator_family"].iloc[0]),
+                "mean_abs_error": float(group["abs_error"].mean()),
+                "estimator_variance": float(group["estimate"].var(ddof=0)),
+                "mean_wess": float(group["shared_wess"].mean()),
+                "mean_ci_width": float(sub_interval["ci_width"].mean()) if not sub_interval.empty else np.nan,
+                "empirical_coverage": float(sub_interval["covered"].mean()) if not sub_interval.empty else np.nan,
+                "spearman_wess_abs_error": _safe_spearman(group["shared_wess"], group["abs_error"]),
+                "spearman_width_abs_error": _safe_spearman(group["ci_width_proxy"], group["abs_error"]),
+            }
+        )
     return pd.DataFrame(rows).sort_values("estimator_key").reset_index(drop=True)
 
 
 def build_table_2_diagnostic_usefulness(raw_df: pd.DataFrame, primary_level: float) -> pd.DataFrame:
-    point_df = _main_experiment_point_df(raw_df, primary_level)
+    point_df = prepare_point_table(raw_df, primary_level=primary_level)
     if point_df.empty:
         return pd.DataFrame()
+    sub = point_df[point_df["experiment_id"] == MAIN_EXPERIMENT_ID].copy()
+    if sub.empty:
+        return pd.DataFrame()
+
+    condition_cols = [col for col in ["sample_size", "mismatch_alpha", "seed"] if col in sub.columns]
+    per_condition_rows = []
+    grouped = sub.groupby(condition_cols + ["estimator_key", "estimator_label", "estimator_family"], dropna=False)
+    for key, group in grouped:
+        if not isinstance(key, tuple):
+            key = (key,)
+        row = dict(zip(condition_cols + ["estimator_key", "estimator_label", "estimator_family"], key))
+        row["spearman_wess_abs_error"] = _safe_spearman(group["shared_wess"], group["abs_error"])
+        row["spearman_width_abs_error"] = _safe_spearman(group["ci_width_proxy"], group["abs_error"])
+        per_condition_rows.append(row)
+    per_condition_df = pd.DataFrame(per_condition_rows)
+    if per_condition_df.empty:
+        return pd.DataFrame()
+
     rows = []
-    for estimator_key, group in point_df.groupby("estimator_key", dropna=False):
+    for estimator_key, group in per_condition_df.groupby("estimator_key", dropna=False):
+        wess = group["spearman_wess_abs_error"].dropna()
+        width = group["spearman_width_abs_error"].dropna()
         rows.append(
             {
                 "estimator_key": estimator_key,
-                "spearman_wess_abs_error": _safe_spearman(group["shared_wess"], group["abs_error"]),
-                "spearman_wess_squared_error": _safe_spearman(group["shared_wess"], group["squared_error"]),
-                "spearman_width_abs_error": _safe_spearman(group["ci_width_proxy"], group["abs_error"]),
-                "spearman_width_squared_error": _safe_spearman(group["ci_width_proxy"], group["squared_error"]),
+                "estimator_label": str(group["estimator_label"].iloc[0]),
+                "estimator_family": str(group["estimator_family"].iloc[0]),
+                "spearman_wess_abs_error": float(wess.mean()) if not wess.empty else np.nan,
+                "spearman_width_abs_error": float(width.mean()) if not width.empty else np.nan,
+                "mean_abs_spearman_wess_abs_error": float(wess.abs().mean()) if not wess.empty else np.nan,
+                "mean_abs_spearman_width_abs_error": float(width.abs().mean()) if not width.empty else np.nan,
+                "se_abs_spearman_wess_abs_error": float(wess.abs().std(ddof=1) / np.sqrt(len(wess))) if len(wess) > 1 else 0.0,
+                "se_abs_spearman_width_abs_error": float(width.abs().std(ddof=1) / np.sqrt(len(width))) if len(width) > 1 else 0.0,
+                "share_expected_sign_wess": float((wess < 0).mean()) if not wess.empty else np.nan,
+                "share_expected_sign_width": float((width > 0).mean()) if not width.empty else np.nan,
+                "num_conditions_wess": int(len(wess)),
+                "num_conditions_width": int(len(width)),
             }
         )
     return pd.DataFrame(rows).sort_values("estimator_key").reset_index(drop=True)
@@ -149,7 +178,7 @@ def generate_study_artifacts(raw_df: pd.DataFrame, output_dir: str | Path, prima
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     point_df = prepare_point_table(raw_df, primary_level=primary_level)
-    condition_summary = build_condition_summary(raw_df)
+    condition_summary = build_condition_summary(raw_df, primary_level=primary_level)
     table_1 = build_table_1_main_summary(raw_df, primary_level=primary_level)
     table_2 = build_table_2_diagnostic_usefulness(raw_df, primary_level=primary_level)
     save_results_table(raw_df, output_dir, "replicate_results")

@@ -9,14 +9,14 @@ from ess_ope.envs.base import DiscreteFiniteHorizonEnv
 from ess_ope.policies.tabular import TabularPolicy
 
 
-MISMATCH_MIX = {"low": 0.15, "medium": 0.35, "high": 0.60}
+MISMATCH_ALPHA_ALIAS = {"low": 0.2, "medium": 0.4, "high": 0.8}
+REWARD_VARIANCE_ALIAS = {"low": 0.25, "medium": 1.0, "high": 4.0}
 BEHAVIOR_FLOOR = 0.02
-REWARD_VARIANCE_SCALE = {"low": 0.15, "medium": 0.45, "high": 0.90}
 
 
 @dataclass
 class StudyEnvironmentBundle:
-    env: StochasticTabularEnv
+    env: "StochasticTabularEnv"
     target_policy: TabularPolicy
     behavior_policy: TabularPolicy
     metadata: Dict[str, Any]
@@ -107,96 +107,26 @@ def _anti_policy_probs(target_probs: np.ndarray) -> np.ndarray:
     return anti
 
 
-def _build_policy_pair(policy_logits: np.ndarray, mismatch_level: str) -> tuple[TabularPolicy, TabularPolicy]:
+def _resolve_mismatch_alpha(value: Any) -> float:
+    if isinstance(value, str):
+        return float(MISMATCH_ALPHA_ALIAS.get(value, value))
+    return float(value)
+
+
+def _resolve_reward_variance_scale(value: Any) -> float:
+    if isinstance(value, str):
+        return float(REWARD_VARIANCE_ALIAS.get(value, value))
+    return float(value)
+
+
+def _build_policy_pair(policy_logits: np.ndarray, mismatch_alpha: Any) -> tuple[TabularPolicy, TabularPolicy]:
     target_probs = _softmax(policy_logits, temperature=0.85)
     anti_probs = _anti_policy_probs(target_probs)
-    mix = float(MISMATCH_MIX[str(mismatch_level)])
-    behavior_probs = (1.0 - mix) * target_probs + mix * anti_probs
+    alpha = float(np.clip(_resolve_mismatch_alpha(mismatch_alpha), 0.0, 1.0))
+    behavior_probs = (1.0 - alpha) * target_probs + alpha * anti_probs
     behavior_probs = _apply_floor(behavior_probs, BEHAVIOR_FLOOR)
     target_probs = _apply_floor(target_probs, 1e-4)
     return TabularPolicy(target_probs), TabularPolicy(behavior_probs)
-
-
-def _bandit_reward_means(rng: np.random.Generator, num_states: int, num_actions: int, structure: str) -> np.ndarray:
-    raise RuntimeError("_bandit_reward_means requires target and behavior policies; use _bandit_reward_means_with_policies instead")
-
-
-def _center_under_target(values: np.ndarray, target_probs: np.ndarray) -> np.ndarray:
-    centered = np.asarray(values, dtype=float).copy()
-    centered -= np.sum(centered * target_probs, axis=-1, keepdims=True)
-    return centered
-
-
-def _bandit_reward_means_with_policies(
-    rng: np.random.Generator,
-    target_probs: np.ndarray,
-    behavior_probs: np.ndarray,
-    structure: str,
-) -> np.ndarray:
-    num_states, num_actions = target_probs.shape
-    states = np.linspace(-1.0, 1.0, num_states)
-    base_state = 0.55 * np.sin(1.8 * states) + 0.35 * states
-    action_offsets = np.linspace(-0.5, 0.5, num_actions)
-
-    if structure == "smooth":
-        smooth_shape = np.tile(action_offsets[None, :], (num_states, 1))
-        deviations = 0.12 * _center_under_target(smooth_shape, target_probs)
-        return (base_state[:, None] + deviations)[None, :, :]
-
-    if structure == "heterogeneous":
-        ratios = target_probs / np.maximum(behavior_probs, 1e-12)
-        favored_actions = np.argmax(ratios, axis=1)
-        spike_shape = np.zeros((num_states, num_actions), dtype=float)
-        spike_shape[np.arange(num_states), favored_actions] = 1.0
-        spike_shape += 0.10 * rng.normal(size=(num_states, num_actions))
-        deviations = 1.75 * _center_under_target(spike_shape, target_probs)
-        return (base_state[:, None] + deviations)[None, :, :]
-
-    raise ValueError(f"Unsupported reward_mean_structure: {structure}")
-
-
-def build_contextual_bandit(seed: int, mismatch_level: str, reward_variance_regime: str, reward_mean_structure: str) -> StudyEnvironmentBundle:
-    rng = np.random.default_rng(seed)
-    num_states = 20
-    num_actions = 4
-    horizon = 1
-
-    state_effect = rng.normal(scale=0.45, size=(num_states, 1))
-    action_effect = rng.normal(scale=0.6, size=(1, num_actions))
-    policy_logits = state_effect + action_effect + 0.25 * rng.normal(size=(num_states, num_actions))
-    target_policy, behavior_policy = _build_policy_pair(policy_logits, mismatch_level)
-
-    rewards = _bandit_reward_means_with_policies(
-        rng,
-        target_probs=target_policy.probs,
-        behavior_probs=behavior_policy.probs,
-        structure=reward_mean_structure,
-    )
-    reward_stds = np.full_like(rewards, REWARD_VARIANCE_SCALE[str(reward_variance_regime)])
-    transition_probs = np.zeros((1, num_states, num_actions, num_states), dtype=float)
-    for s in range(num_states):
-        transition_probs[0, s, :, s] = 1.0
-    initial_state_dist = np.full(num_states, 1.0 / num_states, dtype=float)
-    env = StochasticTabularEnv(
-        transition_probs=transition_probs,
-        rewards=rewards,
-        reward_stds=reward_stds,
-        initial_state_dist=initial_state_dist,
-        horizon=horizon,
-        linear_sa_features=build_linear_features(horizon, num_states, num_actions, 6),
-        env_id=f"bandit_seed{seed}_{reward_variance_regime}_{reward_mean_structure}",
-        seed=seed,
-    )
-    return StudyEnvironmentBundle(
-        env=env,
-        target_policy=target_policy,
-        behavior_policy=behavior_policy,
-        metadata={
-            "env_name": "contextual_bandit",
-            "reward_variance_regime": reward_variance_regime,
-            "reward_mean_structure": reward_mean_structure,
-        },
-    )
 
 
 def _random_branching_transitions(
@@ -224,8 +154,8 @@ def _dense_rewards(rng: np.random.Generator, horizon: int, num_states: int, num_
     t_grid = np.linspace(0.0, 1.0, horizon)[:, None, None]
     s_grid = np.linspace(-1.0, 1.0, num_states)[None, :, None]
     a_grid = np.linspace(-0.8, 0.8, num_actions)[None, None, :]
-    rewards = 0.65 * np.sin(2.0 * np.pi * (s_grid + 0.15 * t_grid)) + 0.35 * a_grid
-    rewards += 0.15 * rng.normal(size=(horizon, num_states, num_actions))
+    rewards = 0.60 * np.sin(2.2 * np.pi * (s_grid + 0.18 * t_grid)) + 0.25 * a_grid
+    rewards += 0.10 * rng.normal(size=(horizon, num_states, num_actions))
     return rewards
 
 
@@ -242,9 +172,9 @@ def _sparse_terminal_rewards(
     final_t = horizon - 1
     for idx, state in enumerate(goal_states):
         rewards[final_t, state, preferred_actions[idx]] = scale
-        rewards[final_t, state] += 0.1 * scale
+        rewards[final_t, state] += 0.08 * scale
     if horizon >= 3:
-        rewards[-2] += 0.2 * rewards[-1]
+        rewards[-2] += 0.15 * rewards[-1]
     return rewards
 
 
@@ -256,16 +186,74 @@ def _time_varying_policy_logits(rng: np.random.Generator, horizon: int, num_stat
     return base + time_bias + action_bias + state_bias
 
 
-def build_short_horizon_mdp(seed: int, mismatch_level: str, reward_variant: str) -> StudyEnvironmentBundle:
+def _fixed_bandit_reward_means(num_states: int, num_actions: int) -> np.ndarray:
+    states = np.linspace(-1.0, 1.0, num_states)
+    actions = np.linspace(-0.6, 0.6, num_actions)
+    state_term = 0.45 * np.sin(1.7 * states) + 0.25 * states
+    action_term = 0.35 * actions
+    interaction = 0.20 * np.outer(np.cos(1.2 * states), actions)
+    return (state_term[:, None] + action_term[None, :] + interaction)[None, :, :]
+
+
+def _bandit_reward_std_template(num_states: int, num_actions: int) -> np.ndarray:
+    states = np.linspace(0.8, 1.2, num_states)
+    actions = np.linspace(0.9, 1.1, num_actions)
+    return np.outer(states, actions)[None, :, :]
+
+
+def build_contextual_bandit(
+    seed: int,
+    mismatch_alpha: Any = 0.4,
+    reward_variance_scale: Any = 1.0,
+    num_states: int = 10,
+    num_actions: int = 5,
+) -> StudyEnvironmentBundle:
+    rng = np.random.default_rng(seed)
+    horizon = 1
+    state_effect = rng.normal(scale=0.45, size=(num_states, 1))
+    action_effect = rng.normal(scale=0.55, size=(1, num_actions))
+    policy_logits = state_effect + action_effect + 0.20 * rng.normal(size=(num_states, num_actions))
+    target_policy, behavior_policy = _build_policy_pair(policy_logits, mismatch_alpha=mismatch_alpha)
+
+    rewards = _fixed_bandit_reward_means(num_states, num_actions)
+    reward_stds = _resolve_reward_variance_scale(reward_variance_scale) * _bandit_reward_std_template(num_states, num_actions)
+    transition_probs = np.zeros((1, num_states, num_actions, num_states), dtype=float)
+    for s in range(num_states):
+        transition_probs[0, s, :, s] = 1.0
+    initial_state_dist = np.full(num_states, 1.0 / num_states, dtype=float)
+    env = StochasticTabularEnv(
+        transition_probs=transition_probs,
+        rewards=rewards,
+        reward_stds=reward_stds,
+        initial_state_dist=initial_state_dist,
+        horizon=horizon,
+        linear_sa_features=build_linear_features(horizon, num_states, num_actions, 6),
+        env_id=f"bandit_seed{seed}_alpha{_resolve_mismatch_alpha(mismatch_alpha):.2f}_var{_resolve_reward_variance_scale(reward_variance_scale):.2f}",
+        seed=seed,
+    )
+    return StudyEnvironmentBundle(
+        env=env,
+        target_policy=target_policy,
+        behavior_policy=behavior_policy,
+        metadata={
+            "env_name": "contextual_bandit",
+            "domain_id": "A",
+            "mismatch_alpha": float(_resolve_mismatch_alpha(mismatch_alpha)),
+            "reward_variance_scale": float(_resolve_reward_variance_scale(reward_variance_scale)),
+        },
+    )
+
+
+def build_short_horizon_mdp(seed: int, mismatch_alpha: Any = 0.4) -> StudyEnvironmentBundle:
     rng = np.random.default_rng(seed)
     horizon = 5
     num_states = 30
-    num_actions = 4
-    transition_probs = _random_branching_transitions(rng, horizon, num_states, num_actions, branch_factor=4, self_bias=1.1)
-    rewards = _dense_rewards(rng, horizon, num_states, num_actions) if reward_variant == "dense" else _sparse_terminal_rewards(rng, horizon, num_states, num_actions, scale=4.5)
-    reward_stds = np.full_like(rewards, 0.25 if reward_variant == "dense" else 0.15)
+    num_actions = 3
+    transition_probs = _random_branching_transitions(rng, horizon, num_states, num_actions, branch_factor=4, self_bias=1.0)
+    rewards = _dense_rewards(rng, horizon, num_states, num_actions)
+    reward_stds = np.full_like(rewards, 0.20)
     policy_logits = _time_varying_policy_logits(rng, horizon, num_states, num_actions)
-    target_policy, behavior_policy = _build_policy_pair(policy_logits, mismatch_level)
+    target_policy, behavior_policy = _build_policy_pair(policy_logits, mismatch_alpha=mismatch_alpha)
     env = StochasticTabularEnv(
         transition_probs=transition_probs,
         rewards=rewards,
@@ -273,29 +261,32 @@ def build_short_horizon_mdp(seed: int, mismatch_level: str, reward_variant: str)
         initial_state_dist=np.full(num_states, 1.0 / num_states, dtype=float),
         horizon=horizon,
         linear_sa_features=build_linear_features(horizon, num_states, num_actions, 8),
-        env_id=f"short_mdp_seed{seed}_{reward_variant}",
+        env_id=f"short_mdp_seed{seed}_alpha{_resolve_mismatch_alpha(mismatch_alpha):.2f}",
         seed=seed,
     )
     return StudyEnvironmentBundle(
         env=env,
         target_policy=target_policy,
         behavior_policy=behavior_policy,
-        metadata={"env_name": "short_tabular_mdp", "reward_variant": reward_variant},
+        metadata={
+            "env_name": "short_tabular_mdp",
+            "domain_id": "B",
+            "mismatch_alpha": float(_resolve_mismatch_alpha(mismatch_alpha)),
+        },
     )
 
 
-def build_long_horizon_mdp(seed: int, mismatch_level: str, reward_variant: str = "sparse_late") -> StudyEnvironmentBundle:
+def build_long_horizon_mdp(seed: int, mismatch_alpha: Any = 0.4) -> StudyEnvironmentBundle:
     rng = np.random.default_rng(seed)
     horizon = 20
-    num_states = 50
-    num_actions = 4
-    transition_probs = _random_branching_transitions(rng, horizon, num_states, num_actions, branch_factor=5, self_bias=0.7)
-    rewards = _sparse_terminal_rewards(rng, horizon, num_states, num_actions, scale=7.0)
-    rewards += 0.10 * _dense_rewards(rng, horizon, num_states, num_actions)
-    reward_stds = np.full_like(rewards, 0.20)
-    reward_stds[-3:] *= 0.8
+    num_states = 40
+    num_actions = 3
+    transition_probs = _random_branching_transitions(rng, horizon, num_states, num_actions, branch_factor=5, self_bias=0.8)
+    rewards = _sparse_terminal_rewards(rng, horizon, num_states, num_actions, scale=6.0)
+    rewards += 0.08 * _dense_rewards(rng, horizon, num_states, num_actions)
+    reward_stds = np.full_like(rewards, 0.18)
     policy_logits = _time_varying_policy_logits(rng, horizon, num_states, num_actions)
-    target_policy, behavior_policy = _build_policy_pair(policy_logits, mismatch_level)
+    target_policy, behavior_policy = _build_policy_pair(policy_logits, mismatch_alpha=mismatch_alpha)
     env = StochasticTabularEnv(
         transition_probs=transition_probs,
         rewards=rewards,
@@ -303,69 +294,46 @@ def build_long_horizon_mdp(seed: int, mismatch_level: str, reward_variant: str =
         initial_state_dist=np.full(num_states, 1.0 / num_states, dtype=float),
         horizon=horizon,
         linear_sa_features=build_linear_features(horizon, num_states, num_actions, 8),
-        env_id=f"long_mdp_seed{seed}_{reward_variant}",
+        env_id=f"long_mdp_seed{seed}_alpha{_resolve_mismatch_alpha(mismatch_alpha):.2f}",
         seed=seed,
     )
     return StudyEnvironmentBundle(
         env=env,
         target_policy=target_policy,
         behavior_policy=behavior_policy,
-        metadata={"env_name": "long_tabular_mdp", "reward_variant": reward_variant},
+        metadata={
+            "env_name": "long_tabular_mdp",
+            "domain_id": "C",
+            "mismatch_alpha": float(_resolve_mismatch_alpha(mismatch_alpha)),
+        },
     )
 
 
-def build_long_stress_mdp(seed: int) -> StudyEnvironmentBundle:
-    rng = np.random.default_rng(seed)
-    horizon = 12
-    num_states = 50
-    num_actions = 4
-    transition_probs = _random_branching_transitions(rng, horizon, num_states, num_actions, branch_factor=4, self_bias=0.9)
-    rewards = 0.45 * _dense_rewards(rng, horizon, num_states, num_actions)
-    rewards += _sparse_terminal_rewards(rng, horizon, num_states, num_actions, scale=5.0)
-    reward_stds = np.full_like(rewards, 0.15)
-    policy_logits = _time_varying_policy_logits(rng, horizon, num_states, num_actions)
-    target_policy, behavior_policy = _build_policy_pair(policy_logits, mismatch_level="low")
-    env = StochasticTabularEnv(
-        transition_probs=transition_probs,
-        rewards=rewards,
-        reward_stds=reward_stds,
-        initial_state_dist=np.full(num_states, 1.0 / num_states, dtype=float),
-        horizon=horizon,
-        linear_sa_features=build_linear_features(horizon, num_states, num_actions, 8),
-        env_id=f"long_stress_seed{seed}",
-        seed=seed,
-    )
-    return StudyEnvironmentBundle(
-        env=env,
-        target_policy=target_policy,
-        behavior_policy=behavior_policy,
-        metadata={"env_name": "long_tabular_mdp", "reward_variant": "long_stress", "calibration_role": "stress"},
-    )
+def build_fqe_case_study(seed: int, calibration_env: str) -> StudyEnvironmentBundle:
+    if calibration_env == "long_horizon":
+        bundle = build_long_horizon_mdp(seed=seed, mismatch_alpha=0.4)
+        bundle.metadata["calibration_env"] = "long_horizon"
+        return bundle
+    bundle = build_short_horizon_mdp(seed=seed, mismatch_alpha=0.4)
+    bundle.metadata["calibration_env"] = "short_horizon"
+    return bundle
 
 
 def build_environment_bundle(environment: Dict[str, Any], seed: int, condition: Dict[str, Any]) -> StudyEnvironmentBundle:
     name = str(environment.get("name", "contextual_bandit"))
-    mismatch_level = str(condition.get("mismatch_level", environment.get("mismatch_level", "medium")))
-    reward_variance_regime = str(condition.get("reward_variance_regime", environment.get("reward_variance_regime", "medium")))
-    reward_mean_structure = str(condition.get("reward_mean_structure", environment.get("reward_mean_structure", "smooth")))
-    reward_variant = str(condition.get("reward_variant", environment.get("reward_variant", "dense")))
-    calibration_env = str(condition.get("calibration_env", "short"))
+    mismatch_alpha = condition.get("mismatch_alpha", environment.get("mismatch_alpha", environment.get("mismatch_level", 0.4)))
+    reward_variance_scale = condition.get(
+        "reward_variance_scale",
+        environment.get("reward_variance_scale", environment.get("reward_variance_regime", 1.0)),
+    )
+    calibration_env = str(condition.get("calibration_env", environment.get("calibration_env", "short_horizon")))
 
     if name == "contextual_bandit":
-        return build_contextual_bandit(
-            seed=seed,
-            mismatch_level=mismatch_level,
-            reward_variance_regime=reward_variance_regime,
-            reward_mean_structure=reward_mean_structure,
-        )
+        return build_contextual_bandit(seed=seed, mismatch_alpha=mismatch_alpha, reward_variance_scale=reward_variance_scale)
     if name == "short_tabular_mdp":
-        return build_short_horizon_mdp(seed=seed, mismatch_level=mismatch_level, reward_variant=reward_variant)
+        return build_short_horizon_mdp(seed=seed, mismatch_alpha=mismatch_alpha)
     if name == "long_tabular_mdp":
-        return build_long_horizon_mdp(seed=seed, mismatch_level=mismatch_level, reward_variant=reward_variant)
-    if name == "fqe_calibration_pair":
-        if calibration_env == "long_stress":
-            return build_long_stress_mdp(seed=seed)
-        bundle = build_short_horizon_mdp(seed=seed, mismatch_level="low", reward_variant="dense")
-        bundle.metadata["calibration_role"] = "positive"
-        return bundle
+        return build_long_horizon_mdp(seed=seed, mismatch_alpha=mismatch_alpha)
+    if name == "fqe_case_study":
+        return build_fqe_case_study(seed=seed, calibration_env=calibration_env)
     raise ValueError(f"Unsupported environment name: {name}")

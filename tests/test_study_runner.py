@@ -28,7 +28,8 @@ def test_tiny_study_smoke_produces_all_paper_artifacts(tmp_path: Path) -> None:
     assert not raw_df.empty
     assert not artifacts["table_1_main_summary"].empty
     assert not artifacts["table_2_diagnostic_usefulness"].empty
-    for idx in range(1, 9):
+    for idx in range(1, 8):
         assert (run_dir / "artifacts" / f"figure_{idx}.png").exists()
+    assert (run_dir / "artifacts" / "appendix_figure_a1.png").exists()
     assert (run_dir / "artifacts" / "replicate_results.csv").exists()
     assert (run_dir / "artifacts" / "condition_summary.csv").exists()

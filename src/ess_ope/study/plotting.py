@@ -48,6 +48,13 @@ def _binned_trend(ax: plt.Axes, x: np.ndarray, y: np.ndarray, bins: int = 10) ->
         ax.plot(centers, means, color="black", linewidth=2.0)
 
 
+def _mean_se(df: pd.DataFrame, value_col: str, group_cols: list[str]) -> pd.DataFrame:
+    grouped = df.groupby(group_cols, dropna=False)[value_col]
+    out = grouped.agg(["mean", "std", "count"]).reset_index()
+    out["se"] = out["std"].fillna(0.0) / np.sqrt(np.maximum(out["count"], 1))
+    return out
+
+
 def generate_study_figures(
     raw_df: pd.DataFrame,
     point_df: pd.DataFrame,
@@ -59,100 +66,138 @@ def generate_study_figures(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    order_variance = ["low", "medium", "high"]
-    order_sample = sorted(point_df["sample_size"].dropna().unique()) if "sample_size" in point_df.columns else []
-    order_mismatch = ["low", "medium", "high"]
-
-    exp1 = raw_df[raw_df["experiment_id"] == "experiment_1"].copy()
-    if not exp1.empty:
-        fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
-        plot_df = exp1[(exp1["estimator_key"].isin(["is", "snis"])) & (exp1["ci_method"] == "point")].copy()
-        if "sample_size" in plot_df.columns and (plot_df["sample_size"] == 1000).any():
-            plot_df = plot_df[plot_df["sample_size"] == 1000]
-        if "mismatch_level" in plot_df.columns and (plot_df["mismatch_level"] == "medium").any():
-            plot_df = plot_df[plot_df["mismatch_level"] == "medium"]
-        wess = plot_df.groupby(["reward_variance_regime", "estimator_key"], dropna=False)["shared_wess"].mean().reset_index()
-        rmse = plot_df.groupby(["reward_variance_regime", "estimator_key"], dropna=False)["squared_error"].mean().reset_index()
-        rmse["rmse"] = np.sqrt(rmse["squared_error"])
-        width = exp1[
-            (exp1["estimator_key"].isin(["is", "snis"]))
-            & (exp1["ci_method"] == "bootstrap_percentile")
-            & (np.isclose(exp1["ci_level"], float(primary_level), equal_nan=False))
-        ].copy()
-        if "sample_size" in width.columns and (width["sample_size"] == 1000).any():
-            width = width[width["sample_size"] == 1000]
-        if "mismatch_level" in width.columns and (width["mismatch_level"] == "medium").any():
-            width = width[width["mismatch_level"] == "medium"]
-        width = width.groupby(["reward_variance_regime", "estimator_key"], dropna=False)["ci_width"].mean().reset_index()
+    exp1_points = raw_df[(raw_df["experiment_id"] == "experiment_1") & (raw_df["ci_method"] == "point")].copy()
+    exp1_interval = raw_df[
+        (raw_df["experiment_id"] == "experiment_1")
+        & (raw_df["ci_method"] == "bootstrap_percentile")
+        & (np.isclose(raw_df["ci_level"], float(primary_level), equal_nan=False))
+    ].copy()
+    if not exp1_points.empty:
+        exp1_points = exp1_points[exp1_points["estimator_key"].isin(["is", "snis"])].copy()
+        exp1_interval = exp1_interval[exp1_interval["estimator_key"].isin(["is", "snis"])].copy()
+        if (exp1_points["sample_size"] == 500).any():
+            exp1_points = exp1_points[exp1_points["sample_size"] == 500]
+            exp1_interval = exp1_interval[exp1_interval["sample_size"] == 500]
+        fig, axes = plt.subplots(1, 4, figsize=(17, 4.5))
+        x_col = "reward_variance_scale"
+        wess = exp1_points.groupby([x_col, "estimator_key"], dropna=False)["shared_wess"].mean().reset_index()
+        est_var = exp1_points.groupby([x_col, "estimator_key"], dropna=False)["estimate"].var(ddof=0).reset_index(name="estimator_variance")
+        abs_error = exp1_points.groupby([x_col, "estimator_key"], dropna=False)["abs_error"].mean().reset_index()
+        width = exp1_interval.groupby([x_col, "estimator_key"], dropna=False)["ci_width"].mean().reset_index()
         for estimator_key, sub in wess.groupby("estimator_key", dropna=False):
-            sub = sub.set_index("reward_variance_regime").reindex(order_variance).reset_index()
-            axes[0].plot(sub["reward_variance_regime"], sub["shared_wess"], marker="o", label=DISPLAY_NAMES[estimator_key])
-        for estimator_key, sub in rmse.groupby("estimator_key", dropna=False):
-            sub = sub.set_index("reward_variance_regime").reindex(order_variance).reset_index()
-            axes[1].plot(sub["reward_variance_regime"], sub["rmse"], marker="o", label=DISPLAY_NAMES[estimator_key])
+            sub = sub.sort_values(x_col)
+            axes[0].plot(sub[x_col], sub["shared_wess"], marker="o", label=DISPLAY_NAMES[estimator_key])
+        for estimator_key, sub in est_var.groupby("estimator_key", dropna=False):
+            sub = sub.sort_values(x_col)
+            axes[1].plot(sub[x_col], sub["estimator_variance"], marker="o", label=DISPLAY_NAMES[estimator_key])
+        for estimator_key, sub in abs_error.groupby("estimator_key", dropna=False):
+            sub = sub.sort_values(x_col)
+            axes[2].plot(sub[x_col], sub["abs_error"], marker="o", label=DISPLAY_NAMES[estimator_key])
         for estimator_key, sub in width.groupby("estimator_key", dropna=False):
-            sub = sub.set_index("reward_variance_regime").reindex(order_variance).reset_index()
-            axes[2].plot(sub["reward_variance_regime"], sub["ci_width"], marker="o", label=DISPLAY_NAMES[estimator_key])
+            sub = sub.sort_values(x_col)
+            axes[3].plot(sub[x_col], sub["ci_width"], marker="o", label=DISPLAY_NAMES[estimator_key])
         axes[0].set_title("Figure 1A: Mean WESS")
-        axes[1].set_title("Figure 1B: RMSE")
-        axes[2].set_title("Figure 1C: Mean CI Width")
-        for ax in axes:
-            ax.set_xlabel("Reward Variance Regime")
+        axes[1].set_title("Figure 1B: Estimator Variance")
+        axes[2].set_title("Figure 1C: Mean Absolute Error")
+        axes[3].set_title("Figure 1D: Mean CI Width")
         axes[0].set_ylabel("Mean WESS")
-        axes[1].set_ylabel("RMSE")
-        axes[2].set_ylabel("Mean CI Width")
-        axes[2].legend(frameon=True, fontsize=8)
+        axes[1].set_ylabel("Variance")
+        axes[2].set_ylabel("Absolute Error")
+        axes[3].set_ylabel("CI Width")
+        for ax in axes:
+            ax.set_xlabel("Reward Variance Scale")
+        axes[3].legend(frameon=True, fontsize=8)
         fig.tight_layout()
         save_figure(fig, output_dir, "figure_1")
 
-    fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
-    plotted_any = False
-    for ax, estimator_key in zip(axes, ["is", "snis", "pdis"]):
-        sub = point_df[point_df["estimator_key"] == estimator_key].copy()
-        if sub.empty:
-            continue
-        plotted_any = True
-        ax.scatter(sub["shared_wess"], sub["abs_error"], s=12, alpha=0.35)
-        _binned_trend(ax, sub["shared_wess"].to_numpy(), sub["abs_error"].to_numpy())
-        corr = sub["shared_wess"].corr(sub["abs_error"], method="spearman")
-        ax.set_title(f"{DISPLAY_NAMES[estimator_key]} (rho={corr:.2f})")
-        ax.set_xlabel("WESS")
-        ax.set_ylabel("Absolute Error")
-    if plotted_any:
+    exp2 = point_df[point_df["experiment_id"] == "experiment_2"].copy()
+    if not exp2.empty:
+        fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+        for ax, estimator_key in zip(axes, ["is", "snis"]):
+            sub = exp2[exp2["estimator_key"] == estimator_key].copy()
+            if sub.empty:
+                continue
+            ax.scatter(sub["shared_wess"], sub["abs_error"], s=14, alpha=0.35)
+            _binned_trend(ax, sub["shared_wess"].to_numpy(), sub["abs_error"].to_numpy())
+            corr = sub["shared_wess"].corr(sub["abs_error"], method="spearman")
+            ax.set_title(f"{DISPLAY_NAMES[estimator_key]} (rho={corr:.2f})")
+            ax.set_xlabel("WESS")
+            ax.set_ylabel("Absolute Error")
         fig.tight_layout()
         save_figure(fig, output_dir, "figure_2")
-    else:
-        plt.close(fig)
 
-    exp3 = point_df[point_df["experiment_id"] == "experiment_3"].copy()
-    if not exp3.empty:
-        if "sample_size" in exp3.columns and (exp3["sample_size"] == 300).any():
-            exp3 = exp3[exp3["sample_size"] == 300]
-        fig, ax = plt.subplots(figsize=(7.5, 5.0))
-        for estimator_key, sub in exp3.groupby("estimator_key", dropna=False):
-            ax.scatter(sub["shared_wess"], sub["abs_error"], s=18, alpha=0.5, label=DISPLAY_NAMES[estimator_key])
-        ax.set_xlabel("WESS")
-        ax.set_ylabel("Absolute Error")
-        ax.set_title("Figure 3: Cross-Family WESS vs Absolute Error")
-        ax.legend(frameon=True, fontsize=8, ncol=2)
+    if not table_2.empty:
+        fig, ax = plt.subplots(figsize=(8.5, 4.8))
+        table_2 = table_2.reset_index(drop=True)
+        x = np.arange(len(table_2))
+        width = 0.35
+        ax.bar(
+            x - width / 2,
+            table_2["mean_abs_spearman_wess_abs_error"],
+            width=width,
+            yerr=table_2["se_abs_spearman_wess_abs_error"],
+            capsize=3,
+            label="Mean |Spearman(WESS, AbsErr)|",
+        )
+        ax.bar(
+            x + width / 2,
+            table_2["mean_abs_spearman_width_abs_error"],
+            width=width,
+            yerr=table_2["se_abs_spearman_width_abs_error"],
+            capsize=3,
+            label="Mean |Spearman(CI Width, AbsErr)|",
+        )
+        ax.set_xticks(x, labels=[DISPLAY_NAMES.get(key, key.upper()) for key in table_2["estimator_key"]])
+        ax.set_ylabel("Condition-Matched Correlation Strength")
+        ax.set_title("Figure 3: Cross-Family Diagnostic Strength Summary")
+        ax.legend(frameon=True, fontsize=9)
         fig.tight_layout()
         save_figure(fig, output_dir, "figure_3")
 
-    if not table_2.empty:
-        heat = table_2.set_index("estimator_key")[
-            [
-                "spearman_wess_abs_error",
-                "spearman_wess_squared_error",
-                "spearman_width_abs_error",
-                "spearman_width_squared_error",
-            ]
-        ]
-        fig, ax = plt.subplots(figsize=(8.5, 4.8))
-        im = ax.imshow(heat.to_numpy(), aspect="auto", cmap="coolwarm", vmin=-1.0, vmax=1.0)
-        ax.set_xticks(np.arange(len(heat.columns)), labels=["WESS/AE", "WESS/SE", "Width/AE", "Width/SE"])
-        ax.set_yticks(np.arange(len(heat.index)), labels=[DISPLAY_NAMES.get(x, x.upper()) for x in heat.index])
-        ax.set_title("Figure 4: Diagnostic Correlation Heatmap")
-        fig.colorbar(im, ax=ax, shrink=0.8)
+    exp3 = point_df[point_df["experiment_id"] == "experiment_3"].copy()
+    if not exp3.empty:
+        appendix = exp3.copy()
+        if (appendix["sample_size"] == 300).any():
+            appendix = appendix[appendix["sample_size"] == 300]
+        fig, ax = plt.subplots(figsize=(7.5, 5.0))
+        for estimator_key, sub in appendix.groupby("estimator_key", dropna=False):
+            ax.scatter(sub["shared_wess"], sub["abs_error"], s=18, alpha=0.45, label=DISPLAY_NAMES[estimator_key])
+        ax.set_xlabel("WESS")
+        ax.set_ylabel("Absolute Error")
+        ax.set_title("Appendix Figure A1: Cross-Family WESS vs Absolute Error")
+        ax.legend(frameon=True, fontsize=8, ncol=2)
+        fig.tight_layout()
+        save_figure(fig, output_dir, "appendix_figure_a1")
+
+    exp4_points = point_df[point_df["experiment_id"] == "experiment_4"].copy()
+    exp4_interval = raw_df[
+        (raw_df["experiment_id"] == "experiment_4")
+        & (raw_df["ci_method"] == "bootstrap_percentile")
+        & (np.isclose(raw_df["ci_level"], float(primary_level), equal_nan=False))
+    ].copy()
+    if not exp4_points.empty:
+        fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
+        err = exp4_points.groupby(["mismatch_alpha", "estimator_key"], dropna=False)["abs_error"].mean().reset_index()
+        wess = exp4_points.groupby(["mismatch_alpha", "estimator_key"], dropna=False)["shared_wess"].mean().reset_index()
+        width = exp4_interval.groupby(["mismatch_alpha", "estimator_key"], dropna=False)["ci_width"].mean().reset_index()
+        for estimator_key, sub in err.groupby("estimator_key", dropna=False):
+            sub = sub.sort_values("mismatch_alpha")
+            axes[0].plot(sub["mismatch_alpha"], sub["abs_error"], marker="o", label=DISPLAY_NAMES[estimator_key])
+        for estimator_key, sub in wess.groupby("estimator_key", dropna=False):
+            sub = sub.sort_values("mismatch_alpha")
+            axes[1].plot(sub["mismatch_alpha"], sub["shared_wess"], marker="o", label=DISPLAY_NAMES[estimator_key])
+        for estimator_key, sub in width.groupby("estimator_key", dropna=False):
+            sub = sub.sort_values("mismatch_alpha")
+            axes[2].plot(sub["mismatch_alpha"], sub["ci_width"], marker="o", label=DISPLAY_NAMES[estimator_key])
+        axes[0].set_title("Figure 4A: Mean Absolute Error")
+        axes[1].set_title("Figure 4B: Mean WESS")
+        axes[2].set_title("Figure 4C: Mean CI Width")
+        axes[0].set_ylabel("Absolute Error")
+        axes[1].set_ylabel("WESS")
+        axes[2].set_ylabel("CI Width")
+        for ax in axes:
+            ax.set_xlabel("Mismatch Alpha")
+        axes[2].legend(frameon=True, fontsize=8, ncol=2)
         fig.tight_layout()
         save_figure(fig, output_dir, "figure_4")
 
@@ -162,63 +207,30 @@ def generate_study_figures(
         & (np.isclose(raw_df["ci_level"], float(primary_level), equal_nan=False))
     ].copy()
     if not exp3_interval.empty:
-        cover = exp3_interval.groupby(["sample_size", "estimator_key"], dropna=False)["covered"].mean().reset_index()
-        width = exp3_interval.groupby(["sample_size", "estimator_key"], dropna=False)["ci_width"].mean().reset_index()
+        cover = _mean_se(exp3_interval, "covered", ["sample_size", "estimator_key"])
+        width = _mean_se(exp3_interval, "ci_width", ["sample_size", "estimator_key"])
         fig, ax = plt.subplots(figsize=(7.5, 5.0))
         for estimator_key, sub in cover.groupby("estimator_key", dropna=False):
-            sub = sub.set_index("sample_size").reindex(order_sample).reset_index()
-            ax.plot(sub["sample_size"], sub["covered"], marker="o", label=DISPLAY_NAMES[estimator_key])
+            sub = sub.sort_values("sample_size")
+            ax.plot(sub["sample_size"], sub["mean"], marker="o", label=DISPLAY_NAMES[estimator_key])
         ax.axhline(float(primary_level), color="black", linestyle="--", linewidth=1.0)
         ax.set_xlabel("Episodes")
         ax.set_ylabel("Empirical Coverage")
-        ax.set_title("Figure 5: Coverage vs Sample Size")
+        ax.set_title("Figure 5: Empirical 90% Coverage vs Sample Size")
         ax.legend(frameon=True, fontsize=8, ncol=2)
         fig.tight_layout()
         save_figure(fig, output_dir, "figure_5")
 
         fig, ax = plt.subplots(figsize=(7.5, 5.0))
         for estimator_key, sub in width.groupby("estimator_key", dropna=False):
-            sub = sub.set_index("sample_size").reindex(order_sample).reset_index()
-            ax.plot(sub["sample_size"], sub["ci_width"], marker="o", label=DISPLAY_NAMES[estimator_key])
+            sub = sub.sort_values("sample_size")
+            ax.errorbar(sub["sample_size"], sub["mean"], yerr=sub["se"], marker="o", capsize=3, label=DISPLAY_NAMES[estimator_key])
         ax.set_xlabel("Episodes")
         ax.set_ylabel("Mean CI Width")
-        ax.set_title("Figure 6: Interval Width vs Sample Size")
+        ax.set_title("Figure 6: Mean 90% CI Width vs Sample Size")
         ax.legend(frameon=True, fontsize=8, ncol=2)
         fig.tight_layout()
         save_figure(fig, output_dir, "figure_6")
-
-    exp4_points = point_df[point_df["experiment_id"] == "experiment_4"].copy()
-    exp4_interval = raw_df[
-        (raw_df["experiment_id"] == "experiment_4")
-        & (raw_df["ci_method"] == "bootstrap_percentile")
-        & (np.isclose(raw_df["ci_level"], float(primary_level), equal_nan=False))
-    ].copy()
-    if not exp4_points.empty:
-        rmse = exp4_points.groupby(["mismatch_level", "estimator_key"], dropna=False)["squared_error"].mean().reset_index()
-        rmse["rmse"] = np.sqrt(rmse["squared_error"])
-        wess = exp4_points.groupby(["mismatch_level", "estimator_key"], dropna=False)["shared_wess"].mean().reset_index()
-        width = exp4_interval.groupby(["mismatch_level", "estimator_key"], dropna=False)["ci_width"].mean().reset_index()
-        fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
-        for estimator_key, sub in rmse.groupby("estimator_key", dropna=False):
-            sub = sub.set_index("mismatch_level").reindex(order_mismatch).reset_index()
-            axes[0].plot(sub["mismatch_level"], sub["rmse"], marker="o", label=DISPLAY_NAMES[estimator_key])
-        for estimator_key, sub in wess.groupby("estimator_key", dropna=False):
-            sub = sub.set_index("mismatch_level").reindex(order_mismatch).reset_index()
-            axes[1].plot(sub["mismatch_level"], sub["shared_wess"], marker="o", label=DISPLAY_NAMES[estimator_key])
-        for estimator_key, sub in width.groupby("estimator_key", dropna=False):
-            sub = sub.set_index("mismatch_level").reindex(order_mismatch).reset_index()
-            axes[2].plot(sub["mismatch_level"], sub["ci_width"], marker="o", label=DISPLAY_NAMES[estimator_key])
-        axes[0].set_title("Figure 7A: RMSE")
-        axes[1].set_title("Figure 7B: WESS")
-        axes[2].set_title("Figure 7C: Mean CI Width")
-        axes[0].set_ylabel("RMSE")
-        axes[1].set_ylabel("WESS")
-        axes[2].set_ylabel("Mean CI Width")
-        for ax in axes:
-            ax.set_xlabel("Mismatch Level")
-        axes[2].legend(frameon=True, fontsize=8, ncol=2)
-        fig.tight_layout()
-        save_figure(fig, output_dir, "figure_7")
 
     exp5 = raw_df[
         (raw_df["experiment_id"] == "experiment_5")
@@ -229,18 +241,20 @@ def generate_study_figures(
     if not exp5.empty:
         fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
         cov = exp5.groupby(["calibration_env", "sample_size"], dropna=False)["covered"].mean().reset_index()
-        wid = exp5.groupby(["calibration_env", "sample_size"], dropna=False)["ci_width"].mean().reset_index()
+        wid = _mean_se(exp5, "ci_width", ["calibration_env", "sample_size"])
         for env_name, sub in cov.groupby("calibration_env", dropna=False):
+            sub = sub.sort_values("sample_size")
             axes[0].plot(sub["sample_size"], sub["covered"], marker="o", label=str(env_name))
         for env_name, sub in wid.groupby("calibration_env", dropna=False):
-            axes[1].plot(sub["sample_size"], sub["ci_width"], marker="o", label=str(env_name))
+            sub = sub.sort_values("sample_size")
+            axes[1].errorbar(sub["sample_size"], sub["mean"], yerr=sub["se"], marker="o", capsize=3, label=str(env_name))
         axes[0].axhline(float(primary_level), color="black", linestyle="--", linewidth=1.0)
-        axes[0].set_title("Figure 8A: FQE Coverage")
-        axes[1].set_title("Figure 8B: FQE Width")
+        axes[0].set_title("Figure 7A: FQE Coverage")
+        axes[1].set_title("Figure 7B: FQE Width")
         axes[0].set_xlabel("Episodes")
         axes[1].set_xlabel("Episodes")
         axes[0].set_ylabel("Empirical Coverage")
         axes[1].set_ylabel("Mean CI Width")
-        axes[1].legend(frameon=True, fontsize=8)
+        axes[1].legend(frameon=True, fontsize=9)
         fig.tight_layout()
-        save_figure(fig, output_dir, "figure_8")
+        save_figure(fig, output_dir, "figure_7")

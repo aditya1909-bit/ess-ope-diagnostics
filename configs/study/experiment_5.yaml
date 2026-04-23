@@ -1,14 +1,14 @@
 experiment_id: experiment_5
 title: FQE bootstrap calibration
 environment:
-  name: fqe_calibration_pair
+  name: fqe_case_study
 grid:
-  calibration_env: [short_positive, long_stress]
-  sample_size: [100, 300, 1000, 3000]
+  calibration_env: [short_horizon, long_horizon]
+  sample_size: [100, 300, 1000]
 estimators: [fqe]
 intervals:
   methods: [bootstrap_percentile, bootstrap_normal]
-  levels: [0.9, 0.95]
+  levels: [0.9]
   primary_level: 0.9
   bootstrap_samples: 500
   subsample_ratio: 1.0

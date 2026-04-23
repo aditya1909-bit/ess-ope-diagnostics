@@ -1,32 +1,30 @@
 # ess-ope-diagnostics
 
-Paper-specific simulation repo for testing when weight-based ESS tracks uncertainty in offline policy evaluation, when it fails, and how interval width and empirical coverage compare across estimator families.
+Paper-specific simulation repo for the revised ESS story:
 
-The current study results support the main thesis:
-- within IS-like estimators, `WESS` tracks weight degeneracy but misses other uncertainty sources
-- across estimator families, shared `WESS` is not a meaningful universal uncertainty diagnostic
-- interval width is a comparable output across methods, but empirical coverage remains estimator-specific and often poor
+- within IS-like estimators, weight-based `WESS` tracks degeneracy but not full uncertainty
+- even there, changing reward variance can move estimator variance, absolute error, and CI width while `WESS` stays nearly fixed
+- across estimator families, shared `WESS` is not a portable comparison language
+- interval width and empirical coverage are definable across families, so they are the more defensible common reporting layer
 
-The full study also now supports the revised secondary claims:
-- `experiment_2` cleanly shows nearly unchanged `WESS` with materially different RMSE and CI width
-- FQE bootstrap calibration works in the easier short-horizon positive case and in the easier long-horizon stress case only once sample size is large enough
+## Simulation Structure
+The paper-facing study is organized around three domains and five paper experiments:
 
-## Study Structure
-The repo surface is a fixed 5-experiment study:
+1. `experiment_1`: Domain A bandit reward-variance intervention
+2. `experiment_2`: Domain A within-family `WESS` vs absolute-error relationship
+3. `experiment_3`: Domain B short-horizon tabular MDP cross-family comparison
+4. `experiment_4`: Domain C long-horizon tabular MDP mismatch stress test
+5. `experiment_5`: FQE bootstrap calibration case study
 
-1. `experiment_1`: bandit same-weights / different-reward-variance sanity check
-2. `experiment_2`: bandit same-mismatch / different-reward-mean structure
-3. `experiment_3`: short-horizon tabular MDP cross-family comparison
-4. `experiment_4`: long-horizon mismatch stress test
-5. `experiment_5`: FQE bootstrap calibration with a short positive case and a long stress case
+The domains are:
 
-Environments:
-- contextual bandit: `S=20`, `A=4`
-- short tabular MDP: `S=30`, `A=4`, `H=5`
-- long tabular MDP stress test: `S=50`, `A=4`, `H=20`
-- long FQE stress-calibration case: easier long-horizon variant with `H=12`, denser rewards, and lower mismatch
+- Domain A: contextual bandit with `S=10`, `A=5`
+- Domain B: short-horizon tabular MDP with `S=30`, `A=3`, `H=5`
+- Domain C: long-horizon tabular MDP with `S=40`, `A=3`, `H=20`
 
-Estimator set:
+## Estimators
+The main estimator set is:
+
 - `is`
 - `snis`
 - `pdis`
@@ -35,24 +33,47 @@ Estimator set:
 - `mrdr`
 - `fqe`
 
-Default study conventions:
-- exact dynamic-programming truth for all environments
+`WDR` is intentionally not in the default paper suite.
+
+## Global Protocol
+The repo now follows one paper-wide reporting protocol:
+
+- exact ground truth for every simulation condition
 - shared dataset seeds across estimators within each condition
-- episode-level bootstrap only
-- 90% as the primary CI level, 95% as secondary
-- Spearman correlations for diagnostic-strength summaries
-- parallel execution on all detected logical CPUs by default
+- `90%` confidence intervals in the main study
+- sample bootstrap for bandits
+- episode bootstrap for MDPs
+- repeated-dataset summaries based on:
+  - mean `WESS`
+  - mean OPE absolute error
+  - empirical estimator variance
+  - mean CI width
+  - empirical CI coverage
+  - Spearman(`WESS`, absolute error)
+  - Spearman(CI width, absolute error)
 
-## What The Full Study Shows
-These are the main takeaways from the current `paper_full` run:
+## Default Experiment Grids
+The paper configs use explicit numeric controls rather than labels like `low` or `high`.
 
-- `experiment_1`: mean `WESS` stays nearly constant across reward-variance regimes while RMSE and interval width increase, which is the cleanest direct evidence that equal `WESS` does not imply equal uncertainty.
-- `experiment_2`: after the redesign, `smooth` and `heterogeneous` reward structures have nearly identical `WESS`, but `heterogeneous` produces clearly larger RMSE and wider intervals.
-- `experiment_3`: `DM` is best on the main benchmark, `DR` is next, `PDIS` is the strongest IS-family baseline, and shared `WESS` does not recover that cross-family ranking.
-- `experiment_4`: as mismatch increases, `WESS` collapses and the IS family degrades sharply, while `DM` remains comparatively stable.
-- `experiment_5`: FQE bootstrap intervals calibrate well in the short positive case by moderate-to-large sample sizes and in the easier long stress case only at large sample size. The repo does not support a claim that FQE is uniformly well-calibrated in hard long-horizon settings.
+- Domain A reward-variance scales: `0.1, 0.25, 0.5, 1.0, 2.0, 4.0`
+- Domain B/C mismatch values: `alpha in {0.0, 0.2, 0.4, 0.6, 0.8}`
+- Main sample sizes: `100, 300, 1000`
+- Repetitions:
+  - `paper_full`: `500`
+  - `paper_practical`: `200`
+  - `paper_tiny`: smoke-test scale
 
-The README therefore intentionally does **not** claim that interval width is always a strong per-replicate error predictor or that all bootstrap intervals are well-calibrated. The evidence is stronger and narrower than that.
+## Figure Lineup
+The artifact generator is aligned with the revised paper:
+
+- `figure_1.png`: bandit reward-variance sanity check
+- `figure_2.png`: within-family `WESS` vs absolute error scatter
+- `figure_3.png`: grouped Spearman bars for `WESS` and CI width
+- `figure_4.png`: long-horizon mismatch stress test
+- `figure_5.png`: empirical `90%` coverage vs sample size
+- `figure_6.png`: mean `90%` CI width vs sample size
+- `figure_7.png`: FQE bootstrap calibration
+- `appendix_figure_a1.png`: cross-family `WESS` vs absolute error scatter
 
 ## Main Commands
 Use the repo venv and set both `PYTHONPATH` and `MPLCONFIGDIR`:
@@ -64,73 +85,54 @@ export MPLCONFIGDIR=/tmp/matplotlib
 ```
 
 Run one experiment:
+
 ```bash
 python experiments/run_experiment.py --config configs/study/experiment_3.yaml
 ```
 
 Run the practical study:
+
 ```bash
 python experiments/run_study.py --config configs/study/paper_practical.yaml
 ```
 
 Run the full study:
+
 ```bash
 python experiments/run_study.py --config configs/study/paper_full.yaml
 ```
 
 Re-analyze saved replicate results:
+
 ```bash
 python experiments/analyze_results.py \
   --results results/latest/artifacts/replicate_results.csv
 ```
 
-The study runner now shows:
-- an `Overall Study` progress bar with ETA
-- a per-experiment progress bar with ETA
-
-## Expected Runtime
-Approximate wall-clock times on the current machine after parallelization:
-- `paper_tiny`: about 20-30 seconds
-- `paper_practical`: several hours
-- `paper_full`: a few hours to low double-digit hours, depending on system load
-
-The dominant cost is bootstrap refitting of the model-based estimators in `experiment_3` to `experiment_5`.
-
-## Config Tiers
-- `configs/study/paper_full.yaml`: 500 replicates, 500 bootstraps
-- `configs/study/paper_practical.yaml`: 200 replicates, 200 bootstraps
-- `configs/study/paper_tiny.yaml`: smoke-test scale
-
-Individual experiments live under `configs/study/experiment_*.yaml`.
-
 ## Outputs
 Each run writes a timestamped directory under `results/` containing:
+
 - `artifacts/replicate_results.csv`
+- `artifacts/point_estimates.csv`
 - `artifacts/condition_summary.csv`
 - `artifacts/table_1_main_summary.csv`
 - `artifacts/table_2_diagnostic_usefulness.csv`
-- `artifacts/figure_1.png` through `artifacts/figure_8.png`
+- `artifacts/figure_1.png` through `artifacts/figure_7.png`
+- `artifacts/appendix_figure_a1.png`
 - `config.yaml`
 - `metadata.json`
 
 `results/latest` is refreshed to the newest run.
 
-The most important outputs are:
-- `table_1_main_summary.csv`: main benchmark bias, variance, RMSE, mean `WESS`, mean CI width, and coverage
-- `table_2_diagnostic_usefulness.csv`: Spearman diagnostic summaries
-- `replicate_results.csv`: the raw table used for all figures and summaries
-
 ## Narrative Order
-The analysis and figures follow the paper narrative directly:
-- bandit sanity checks
-- short-horizon cross-family comparison
-- long-horizon stress test
-- FQE interval calibration
+The simulation section is meant to read in this order:
 
-For the current results, the constructive interpretation should be:
-- `WESS` is not a universal cross-family uncertainty language
-- interval outputs should be judged by empirical coverage and width, estimator by estimator
-- FQE intervals can be meaningful, but only in regimes where the estimator itself is not badly biased
+1. Bandit reward-variance intervention: `WESS` misses reward-driven uncertainty.
+2. Within-family scatter: `WESS` still carries partial information about degeneracy.
+3. Short-horizon cross-family comparison: shared `WESS` does not port across estimator families.
+4. Long-horizon stress test: IS-style methods degrade sharply as mismatch grows.
+5. Interval-based comparison: width and coverage are comparable outputs across families.
+6. FQE case study: bootstrap intervals can become meaningful in a family-specific setting.
 
 ## Setup
 ```bash

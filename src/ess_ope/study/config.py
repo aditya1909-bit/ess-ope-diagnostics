@@ -22,7 +22,7 @@ class ExperimentConfig:
     intervals: Dict[str, Any] = field(
         default_factory=lambda: {
             "methods": ["bootstrap_percentile", "bootstrap_normal"],
-            "levels": [0.9, 0.95],
+            "levels": [0.9],
             "primary_level": 0.9,
             "bootstrap_samples": 500,
             "subsample_ratio": 1.0,

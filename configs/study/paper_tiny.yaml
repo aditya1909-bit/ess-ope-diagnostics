@@ -15,3 +15,5 @@ overrides:
     primary_level: 0.9
   grid:
     sample_size: [20, 40]
+    mismatch_alpha: [0.0, 0.4]
+    reward_variance_scale: [0.1, 1.0]

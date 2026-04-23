@@ -1,16 +1,15 @@
 experiment_id: experiment_2
-title: Same mismatch, different reward mean structure
+title: Within-family WESS versus absolute error
 environment:
   name: contextual_bandit
-  mismatch_level: medium
-  reward_variance_regime: medium
+  mismatch_alpha: 0.4
+  reward_variance_scale: 1.0
 grid:
-  sample_size: [100, 300, 1000, 3000]
-  reward_mean_structure: [smooth, heterogeneous]
+  sample_size: [500]
 estimators: [is, snis]
 intervals:
   methods: [bootstrap_percentile, bootstrap_normal]
-  levels: [0.9, 0.95]
+  levels: [0.9]
   primary_level: 0.9
   bootstrap_samples: 500
   subsample_ratio: 1.0
